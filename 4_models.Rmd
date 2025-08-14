@@ -1,0 +1,642 @@
+---
+title: "Knowledge, Confidence, and Willingness to Accept Iron Supplementation Among Blood Donors Across Multiple Countries - 4"
+author: "A. Meulenbeld"
+date: "2025-07-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(dplyr)
+
+opts_chunk$set(#results = 'asis',      # Can also be set at the chunk-level. IT IS NEEDED IN THE dfsummary chunck
+               comment = NA,
+               prompt  = FALSE,
+               cache   = FALSE,
+               echo = TRUE,
+               message = FALSE,
+               warning = FALSE,
+               width.cutoff=60
+)
+library(summarytools)
+st_options(plain.ascii = FALSE,        # Always use this option in Rmd documents
+           style        = "rmarkdown", # Always use this option in Rmd documents
+           footnote     = NA,          # Makes html-rendered results more concise
+           subtitle.emphasis = FALSE)  # Improves layout with some rmardown themes
+
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(summarytools)
+library(haven)
+library(patchwork)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(grid)
+library(cowplot)
+```
+
+# Functions
+```{r}
+# Verbeterde functie om ORs te berekenen met duidelijke labels
+calculate_OR <- function(model) {
+  # Bereken odds ratios
+  OR <- exp(coef(model))
+  
+  # Bereken betrouwbaarheidsintervallen
+  CI <- exp(confint.default(model))  # Gebruik confint.default voor stabielere berekening
+  
+  # Combineer resultaten
+  result <- data.frame(
+    OR = OR,
+    CI_lower = CI[,1],
+    CI_upper = CI[,2]
+  )
+  
+  return(result)
+}
+
+
+##OR
+
+# Functie om ORs per model te printen met duidelijke variabelenamen
+print_clear_OR_table <- function(model, model_name) {
+  # Bereken OR data
+  or_data <- calculate_OR(model)
+  
+  # Haal p-waarden op
+  summary_data <- summary(model)
+  p_values <- summary_data$coefficients[,4]
+  
+  # Haal variabele namen op
+  var_names <- names(coef(model))
+  
+  # Maak een duidelijke tabel
+  result_table <- data.frame(
+    Variable = var_names,
+    OR = round(or_data$OR, 2),
+    CI_95_lower = round(or_data$CI_lower, 2),
+    CI_95_upper = round(or_data$CI_upper, 2),
+    p_value = round(p_values, 3)
+  )
+  
+  # Voeg significantie toe
+  result_table$significance <- ""
+  result_table$significance[result_table$p_value < 0.05] <- "*"
+  result_table$significance[result_table$p_value < 0.01] <- "**"
+  result_table$significance[result_table$p_value < 0.001] <- "***"
+  
+  # Print header
+  cat("\n\n=========================================================\n")
+  cat(paste0("ODDS RATIOS: ", model_name, "\n"))
+  cat("=========================================================\n\n")
+  
+  # Print elk resultaat op een eigen regel met duidelijke labels
+  for (i in 1:nrow(result_table)) {
+    cat(sprintf("%-40s: OR = %5.2f (95%% CI: %5.2f - %5.2f), p = %5.3f %s\n",
+                result_table$Variable[i], 
+                result_table$OR[i],
+                result_table$CI_95_lower[i],
+                result_table$CI_95_upper[i],
+                result_table$p_value[i],
+                result_table$significance[i]))
+  }
+  
+  # Voetnoot voor significantie
+  cat("\nSignificantie codes: 0 '***' 0.001 '**' 0.01 '*' 0.05\n")
+  
+  return(invisible(result_table))
+}
+
+```
+
+# Open data
+```{r, data}
+donor_data <- readRDS("L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/2. Datasets/thesis_fleur/processed_data.rds")
+
+save_model_path <- "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/models/"
+```
+
+# Adjust data
+```{r}
+
+# Change disagree = 0 en agree = 1 & ref = NL
+donor_data$IronSuppSanqCondition3 <- relevel(donor_data$IronSuppSanqCondition3, ref = "Disagree")
+donor_data$IronSuppSanqCondition4 <- relevel(donor_data$IronSuppSanqCondition4, ref = "Disagree")
+donor_data$IronSuppSanqCondition6 <- relevel(donor_data$IronSuppSanqCondition6, ref = "Disagree")
+
+donor_data$general_confidence_percent_cat <- relevel(factor(donor_data$general_confidence_percent_cat), ref = "Medium")
+donor_data$general_knowledge_percent_cat <- relevel(factor(donor_data$general_knowledge_percent_cat), ref = "Medium")
+donor_data$hemoglobin_knowledge_percent_cat <- relevel(factor(donor_data$hemoglobin_knowledge_percent_cat), ref = "Medium")
+donor_data$hemoglobin_confidence_percent_cat <- relevel(factor(donor_data$hemoglobin_confidence_percent_cat), ref = "Medium")
+donor_data$ferritin_confidence_percent_cat <- relevel(factor(donor_data$ferritin_confidence_percent_cat), ref = "Medium")
+donor_data$ferritin_knowledge_percent_cat <- relevel(factor(donor_data$ferritin_knowledge_percent_cat), ref = "Medium")
+donor_data$ironsupplements_knowledge_percent_cat <- relevel(factor(donor_data$ironsupplements_knowledge_percent_cat), ref = "Medium")
+donor_data$ironsupplements_confidence_percent_cat <- relevel(factor(donor_data$ironsupplements_confidence_percent_cat), ref = "Medium")
+
+donor_data$Country <- relevel(factor(donor_data$Country), ref = "NL")
+
+# Change to numeric
+donor_data$opinion_numeric <- NA  # Begin met NA's
+donor_data$opinion_numeric[donor_data$OpinionBloodService7 == "Totally disagree"] <- 1
+donor_data$opinion_numeric[donor_data$OpinionBloodService7 == "Disagree"] <- 2
+donor_data$opinion_numeric[donor_data$OpinionBloodService7 == "Neutral"] <- 3
+donor_data$opinion_numeric[donor_data$OpinionBloodService7 == "Agree"] <- 4
+donor_data$opinion_numeric[donor_data$OpinionBloodService7 == "Totally agree"] <- 5
+
+#change to quadratic
+mean_opinion <- mean(donor_data$opinion_numeric, na.rm = TRUE)
+
+donor_data$opinion_centered <- donor_data$opinion_numeric - mean_opinion
+donor_data$opinion_centered_squared <- donor_data$opinion_centered^2
+```
+
+# Logistic Regression with centered terms for OpinionBloodService
+## IronSuppSanqCondition3 models
+```{r}
+# General knowledge domain
+model_general_3_centered <- glm(IronSuppSanqCondition3 ~ general_knowledge_percent_cat * general_confidence_percent_cat + Sex +
+                                Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                                data = donor_data, 
+                                family = binomial(link = "logit"))
+summary(model_general_3_centered)
+
+# Hemoglobin knowledge domain met effect modificator Sex
+model_hemoglobin_3_centered <- glm(IronSuppSanqCondition3 ~ hemoglobin_knowledge_percent_cat * hemoglobin_confidence_percent_cat + Sex +
+                                   Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                                   data = donor_data, 
+                                   family = binomial(link = "logit"))
+summary(model_hemoglobin_3_centered)
+
+# Ferritin knowledge domain  
+model_ferritin_3_centered <- glm(IronSuppSanqCondition3 ~ ferritin_knowledge_percent_cat * ferritin_confidence_percent_cat +
+                                 Sex * hemoglobin_knowledge_percent_cat + 
+                                 Sex * hemoglobin_confidence_percent_cat +
+                                 Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                                 data = donor_data, 
+                                 family = binomial(link = "logit"))
+summary(model_ferritin_3_centered)
+
+# Iron supplements knowledge domain with effect modificator Sex
+model_iron_3_centered <- glm(IronSuppSanqCondition3 ~ ironsupplements_knowledge_percent_cat * ironsupplements_confidence_percent_cat +
+                             Sex * ironsupplements_knowledge_percent_cat +
+                             Sex * ironsupplements_confidence_percent_cat + 
+                             Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                             data = donor_data, 
+                             family = binomial(link = "logit"))
+summary(model_iron_3_centered)
+
+saveRDS(model_general_3_centered, file =paste0(save_model_path, "model_general_3_centered.rds"))
+saveRDS(model_hemoglobin_3_centered, file = paste0(save_model_path,"model_hemoglobin_3_centered.rds"))
+saveRDS(model_ferritin_3_centered, file =paste0(save_model_path, "model_ferritin_3_centered.rds"))
+saveRDS(model_iron_3_centered, file =paste0(save_model_path, "model_iron_3_centered.rds"))
+```
+
+## IronSuppSanqCondition4 models
+```{r}
+# General knowledge domain
+model_general_4_centered <- glm(IronSuppSanqCondition4 ~ general_knowledge_percent_cat * general_confidence_percent_cat +
+                                Sex * hemoglobin_knowledge_percent_cat + 
+                                Sex * hemoglobin_confidence_percent_cat +
+                                Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                                data = donor_data, 
+                                family = binomial(link = "logit"))
+summary(model_general_4_centered)
+
+# Hemoglobin knowledge domain
+model_hemoglobin_4_centered <- glm(IronSuppSanqCondition4 ~ hemoglobin_knowledge_percent_cat * hemoglobin_confidence_percent_cat + Sex +
+                                   Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                                   data = donor_data, 
+                                   family = binomial(link = "logit"))
+summary(model_hemoglobin_4_centered)
+
+# Ferritin knowledge domain  
+model_ferritin_4_centered <- glm(IronSuppSanqCondition4 ~ ferritin_knowledge_percent_cat * ferritin_confidence_percent_cat + Sex + 
+                                 Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                                 data = donor_data, 
+                                 family = binomial(link = "logit"))
+summary(model_ferritin_4_centered)
+
+# Model 4 met interactie en controlevariabelen: Iron supplements knowledge domain
+model_iron_4_centered <- glm(IronSuppSanqCondition4 ~ ironsupplements_knowledge_percent_cat * ironsupplements_confidence_percent_cat +
+                             Sex * hemoglobin_knowledge_percent_cat + 
+                             Sex * hemoglobin_confidence_percent_cat +
+                             Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                             data = donor_data, 
+                             family = binomial(link = "logit"))
+summary(model_iron_4_centered)
+
+saveRDS(model_general_4_centered, file = paste0(save_model_path,"model_general_4_centered.rds"))
+saveRDS(model_hemoglobin_4_centered, file = paste0(save_model_path,"model_hemoglobin_4_centered.rds"))
+saveRDS(model_ferritin_4_centered, file = paste0(save_model_path,"model_ferritin_4_centered.rds"))
+saveRDS(model_iron_4_centered, file = paste0(save_model_path,"model_iron_4_centered.rds"))
+```
+
+## IronSuppSanqCondition6 models  
+```{r}
+#################################################
+# IronSuppSanqCondition6
+#################################################
+
+# General knowledge domain
+model_general_6_centered <- glm(IronSuppSanqCondition6 ~ general_knowledge_percent_cat * general_confidence_percent_cat +
+                                Sex * hemoglobin_knowledge_percent_cat + 
+                                Sex * hemoglobin_confidence_percent_cat +
+                                Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                                data = donor_data, 
+                                family = binomial(link = "logit"))
+summary(model_general_6_centered)
+
+# Hemoglobin knowledge domain with effect modification Sex
+model_hemoglobin_6_centered <- glm(IronSuppSanqCondition6 ~ hemoglobin_knowledge_percent_cat * hemoglobin_confidence_percent_cat +
+                                   Sex * hemoglobin_knowledge_percent_cat +
+                                   Sex * hemoglobin_confidence_percent_cat + 
+                                   Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                                   data = donor_data, 
+                                   family = binomial(link = "logit"))
+summary(model_hemoglobin_6_centered)
+
+# Ferritin knowledge domain with effect modification Sex
+model_ferritin_6_centered <- glm(IronSuppSanqCondition6 ~ ferritin_knowledge_percent_cat * ferritin_confidence_percent_cat +
+                                 Sex * ferritin_knowledge_percent_cat + 
+                                 Sex * ferritin_confidence_percent_cat +
+                                 Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                                 data = donor_data, 
+                                 family = binomial(link = "logit"))
+summary(model_ferritin_6_centered)
+
+# Iron supplements knowledge domain with effect modification Sex 
+model_iron_6_centered <- glm(IronSuppSanqCondition6 ~ ironsupplements_knowledge_percent_cat * ironsupplements_confidence_percent_cat +
+                             Sex * ironsupplements_knowledge_percent_cat +
+                             Sex * ironsupplements_confidence_percent_cat +
+                             Country + prior_IronUse + opinion_centered + opinion_centered_squared,
+                             data = donor_data, 
+                             family = binomial(link = "logit"))
+summary(model_iron_6_centered)
+
+saveRDS(model_general_6_centered, file = paste0(save_model_path,"model_general_6_centered.rds"))
+saveRDS(model_hemoglobin_6_centered, file = paste0(save_model_path,"model_hemoglobin_6_centered.rds"))
+saveRDS(model_ferritin_6_centered, file = paste0(save_model_path,"model_ferritin_6_centered.rds"))
+saveRDS(model_iron_6_centered, file =paste0(save_model_path, "model_iron_6_centered.rds"))
+
+```
+
+## print model outputs
+
+```{r}
+# Condition 3 modellen met gecentreerde lineaire en kwadratische termen
+cat("\n\n===========================================================================")
+cat("\nCONDITION 3 MODELLEN MET GECENTREERDE TERMEN - ODDS RATIOS RESULTATEN")
+cat("\n===========================================================================")
+
+print_clear_OR_table(model_general_3_centered, "General Knowledge - Condition 3 (Centered)")
+print_clear_OR_table(model_hemoglobin_3_centered, "Hemoglobin Knowledge - Condition 3 (Centered)")
+print_clear_OR_table(model_ferritin_3_centered, "Ferritin Knowledge - Condition 3 (Centered)")
+print_clear_OR_table(model_iron_3_centered, "Iron Supplements Knowledge - Condition 3 (Centered)")
+
+# Condition 4 modellen met gecentreerde lineaire en kwadratische termen
+cat("\n\n===========================================================================")
+cat("\nCONDITION 4 MODELLEN MET GECENTREERDE TERMEN - ODDS RATIOS RESULTATEN")
+cat("\n===========================================================================")
+
+print_clear_OR_table(model_general_4_centered, "General Knowledge - Condition 4 (Centered)")
+print_clear_OR_table(model_hemoglobin_4_centered, "Hemoglobin Knowledge - Condition 4 (Centered)")
+print_clear_OR_table(model_ferritin_4_centered, "Ferritin Knowledge - Condition 4 (Centered)")
+print_clear_OR_table(model_iron_4_centered, "Iron Supplements Knowledge - Condition 4 (Centered)")
+
+# Condition 6 modellen met gecentreerde lineaire en kwadratische termen
+cat("\n\n===========================================================================")
+cat("\nCONDITION 6 MODELLEN MET GECENTREERDE TERMEN - ODDS RATIOS RESULTATEN")
+cat("\n===========================================================================")
+
+print_clear_OR_table(model_general_6_centered, "General Knowledge - Condition 6 (Centered)")
+print_clear_OR_table(model_hemoglobin_6_centered, "Hemoglobin Knowledge - Condition 6 (Centered)")
+print_clear_OR_table(model_ferritin_6_centered, "Ferritin Knowledge - Condition 6 (Centered)")
+print_clear_OR_table(model_iron_6_centered, "Iron Supplements Knowledge - Condition 6 (Centered)")
+
+
+```
+
+# Logistische regressie met polynomen opinionBloodservice
+
+## relevel data
+
+```{r}
+
+# Change disagree = 0 en agree = 1 & ref = NL
+donor_data$IronSuppSanqCondition3 <- relevel(donor_data$IronSuppSanqCondition3, ref = "Disagree")
+donor_data$IronSuppSanqCondition4 <- relevel(donor_data$IronSuppSanqCondition4, ref = "Disagree")
+donor_data$IronSuppSanqCondition6 <- relevel(donor_data$IronSuppSanqCondition6, ref = "Disagree")
+
+donor_data$general_confidence_percent_cat <- relevel(factor(donor_data$general_confidence_percent_cat), ref = "Medium")
+donor_data$general_knowledge_percent_cat <- relevel(factor(donor_data$general_knowledge_percent_cat), ref = "Medium")
+donor_data$hemoglobin_knowledge_percent_cat <- relevel(factor(donor_data$hemoglobin_knowledge_percent_cat), ref = "Medium")
+donor_data$hemoglobin_confidence_percent_cat <- relevel(factor(donor_data$hemoglobin_confidence_percent_cat), ref = "Medium")
+donor_data$ferritin_confidence_percent_cat <- relevel(factor(donor_data$ferritin_confidence_percent_cat), ref = "Medium")
+donor_data$ferritin_knowledge_percent_cat <- relevel(factor(donor_data$ferritin_knowledge_percent_cat), ref = "Medium")
+donor_data$ironsupplements_knowledge_percent_cat <- relevel(factor(donor_data$ironsupplements_knowledge_percent_cat), ref = "Medium")
+donor_data$ironsupplements_confidence_percent_cat <- relevel(factor(donor_data$ironsupplements_confidence_percent_cat), ref = "Medium")
+
+donor_data$Country <- relevel(factor(donor_data$Country), ref = "NL")
+
+```
+
+## IronSuppSanqCondition3
+```{r}
+
+# General knowledge domain
+model_general_3 <- glm(IronSuppSanqCondition3 ~ general_knowledge_percent_cat * general_confidence_percent_cat + Sex +
+                       Country + prior_IronUse + OpinionBloodService7,
+                       data = donor_data, 
+                       family = binomial(link = "logit"))
+summary(model_general_3)
+
+# Hemoglobin knowledge domain met effect modificator Sex
+model_hemoglobin_3 <- glm(IronSuppSanqCondition3 ~ hemoglobin_knowledge_percent_cat * hemoglobin_confidence_percent_cat + Sex +
+                          Country + prior_IronUse + OpinionBloodService7,
+                          data = donor_data, 
+                          family = binomial(link = "logit"))
+summary(model_hemoglobin_3)
+
+# Ferritin knowledge domain  
+model_ferritin_3 <- glm(IronSuppSanqCondition3 ~ ferritin_knowledge_percent_cat * ferritin_confidence_percent_cat +
+                        Sex * hemoglobin_knowledge_percent_cat + 
+                        Sex * hemoglobin_confidence_percent_cat +
+                        Country + prior_IronUse + OpinionBloodService7,
+                        data = donor_data, 
+                        family = binomial(link = "logit"))
+summary(model_ferritin_3)
+
+# Iron supplements knowledge domain with effect modificator Sex
+model_iron_3 <- glm(IronSuppSanqCondition3 ~ ironsupplements_knowledge_percent_cat * ironsupplements_confidence_percent_cat +
+                    Sex * ironsupplements_knowledge_percent_cat +
+                    Sex * ironsupplements_confidence_percent_cat + 
+                    Country + prior_IronUse + OpinionBloodService7,
+                    data = donor_data, 
+                    family = binomial(link = "logit"))
+summary(model_iron_3)
+
+saveRDS(model_general_3, file = paste0(save_model_path, "model_general_3.rds"))
+saveRDS(model_hemoglobin_3, file = paste0(save_model_path,"model_hemoglobin_3.rds"))
+saveRDS(model_ferritin_3, file = paste0(save_model_path,"model_ferritin_3.rds"))
+saveRDS(model_iron_3, file = paste0(save_model_path,"model_iron_3.rds"))
+```
+
+## IronSuppSanqCondition4
+```{r}
+# General knowledge domain
+model_general_4 <- glm(IronSuppSanqCondition4 ~ general_knowledge_percent_cat * general_confidence_percent_cat +
+                      Sex * hemoglobin_knowledge_percent_cat + 
+                      Sex * hemoglobin_confidence_percent_cat +
+                      Country + prior_IronUse + OpinionBloodService7,
+                      data = donor_data, 
+                      family = binomial(link = "logit"))
+summary(model_general_4)
+
+# Hemoglobin knowledge domain
+model_hemoglobin_4 <- glm(IronSuppSanqCondition4 ~ hemoglobin_knowledge_percent_cat * hemoglobin_confidence_percent_cat + Sex +
+                         Country + prior_IronUse + OpinionBloodService7,
+                         data = donor_data, 
+                         family = binomial(link = "logit"))
+summary(model_hemoglobin_4)
+
+# Ferritin knowledge domain  
+model_ferritin_4 <- glm(IronSuppSanqCondition4 ~ ferritin_knowledge_percent_cat * ferritin_confidence_percent_cat + Sex + 
+                       Country + prior_IronUse + OpinionBloodService7,
+                       data = donor_data, 
+                       family = binomial(link = "logit"))
+summary(model_ferritin_4)
+
+# Model 4 met interactie en controlevariabelen: Iron supplements knowledge domain
+model_iron_4 <- glm(IronSuppSanqCondition4 ~ ironsupplements_knowledge_percent_cat * ironsupplements_confidence_percent_cat +
+                      Sex * hemoglobin_knowledge_percent_cat + 
+                      Sex * hemoglobin_confidence_percent_cat +
+                   Country + prior_IronUse + OpinionBloodService7,
+                   data = donor_data, 
+                   family = binomial(link = "logit"))
+summary(model_iron_4)
+
+saveRDS(model_general_4, file = paste0(save_model_path, "model_general_4.rds"))
+saveRDS(model_hemoglobin_4, file = paste0(save_model_path,"model_hemoglobin_4.rds"))
+saveRDS(model_ferritin_4, file = paste0(save_model_path,"model_ferritin_4.rds"))
+saveRDS(model_iron_4, file = paste0(save_model_path,"model_iron_4.rds"))
+```
+
+
+## IronSuppSanqCondition6
+```{r}
+# General knowledge domain
+model_general_6 <- glm(IronSuppSanqCondition6 ~ general_knowledge_percent_cat * general_confidence_percent_cat +
+                      Sex * hemoglobin_knowledge_percent_cat + 
+                      Sex * hemoglobin_confidence_percent_cat +
+                      Country + prior_IronUse + OpinionBloodService7,
+                      data = donor_data, 
+                      family = binomial(link = "logit"))
+summary(model_general_6)
+
+# Hemoglobin knowledge domain with effect modification Sex
+model_hemoglobin_6 <- glm(IronSuppSanqCondition6 ~ hemoglobin_knowledge_percent_cat * hemoglobin_confidence_percent_cat +
+                         Sex * hemoglobin_knowledge_percent_cat +
+                         Sex * hemoglobin_confidence_percent_cat + 
+                         Country + prior_IronUse + OpinionBloodService7,
+                         data = donor_data, 
+                         family = binomial(link = "logit"))
+summary(model_hemoglobin_6)
+
+# Ferritin knowledge domain with effect modification Sex
+model_ferritin_6 <- glm(IronSuppSanqCondition6 ~ ferritin_knowledge_percent_cat * ferritin_confidence_percent_cat +
+                       Sex * ferritin_knowledge_percent_cat + 
+                       Sex * ferritin_confidence_percent_cat +
+                       Country + prior_IronUse + OpinionBloodService7,
+                       data = donor_data, 
+                       family = binomial(link = "logit"))
+summary(model_ferritin_6)
+
+# Iron supplements knowledge domain with effect modification Sex 
+model_iron_6 <- glm(IronSuppSanqCondition6 ~ ironsupplements_knowledge_percent_cat * ironsupplements_confidence_percent_cat +
+                   Sex * ironsupplements_knowledge_percent_cat +
+                   Sex * ironsupplements_confidence_percent_cat +
+                   Country + prior_IronUse + OpinionBloodService7,
+                   data = donor_data, 
+                   family = binomial(link = "logit"))
+summary(model_iron_6)
+
+saveRDS(model_general_6, file = paste0(save_model_path, "model_general_6.rds"))
+saveRDS(model_hemoglobin_6, file = paste0(save_model_path,"model_hemoglobin_6.rds"))
+saveRDS(model_ferritin_6, file = paste0(save_model_path,"model_ferritin_6.rds"))
+saveRDS(model_iron_6, file = paste0(save_model_path,"model_iron_6.rds"))
+
+```
+
+## Print model outputs
+```{r}
+# Condition 3 modellen
+cat("\n\n===========================================================================")
+cat("\nCONDITION 3 MODELLEN - ODDS RATIOS RESULTATEN")
+cat("\n===========================================================================")
+
+print_clear_OR_table(model_general_3, "General Knowledge - Condition 3")
+print_clear_OR_table(model_hemoglobin_3, "Hemoglobin Knowledge - Condition 3")
+print_clear_OR_table(model_ferritin_3, "Ferritin Knowledge - Condition 3")
+print_clear_OR_table(model_iron_3, "Iron Supplements Knowledge - Condition 3")
+
+# Condition 4 modellen
+cat("\n\n===========================================================================")
+cat("\nCONDITION 4 MODELLEN - ODDS RATIOS RESULTATEN")
+cat("\n===========================================================================")
+
+print_clear_OR_table(model_general_4, "General Knowledge - Condition 4")
+print_clear_OR_table(model_hemoglobin_4, "Hemoglobin Knowledge - Condition 4")
+print_clear_OR_table(model_ferritin_4, "Ferritin Knowledge - Condition 4")
+print_clear_OR_table(model_iron_4, "Iron Supplements Knowledge - Condition 4")
+
+# Condition 6 modellen
+cat("\n\n===========================================================================")
+cat("\nCONDITION 6 MODELLEN - ODDS RATIOS RESULTATEN")
+cat("\n===========================================================================")
+
+print_clear_OR_table(model_general_6, "General Knowledge - Condition 6")
+print_clear_OR_table(model_hemoglobin_6, "Hemoglobin Knowledge - Condition 6")
+print_clear_OR_table(model_ferritin_6, "Ferritin Knowledge - Condition 6")
+print_clear_OR_table(model_iron_6, "Iron Supplements Knowledge - Condition 6")
+
+```
+
+# Crude analyses 
+## relevel data
+
+```{r}
+
+# Same reference levels as the other analyses
+donor_data$IronSuppSanqCondition3 <- relevel(donor_data$IronSuppSanqCondition3, ref = "Disagree")
+donor_data$IronSuppSanqCondition4 <- relevel(donor_data$IronSuppSanqCondition4, ref = "Disagree")
+donor_data$IronSuppSanqCondition6 <- relevel(donor_data$IronSuppSanqCondition6, ref = "Disagree")
+
+donor_data$general_confidence_percent_cat <- relevel(factor(donor_data$general_confidence_percent_cat), ref = "Medium")
+donor_data$general_knowledge_percent_cat <- relevel(factor(donor_data$general_knowledge_percent_cat), ref = "Medium")
+donor_data$hemoglobin_knowledge_percent_cat <- relevel(factor(donor_data$hemoglobin_knowledge_percent_cat), ref = "Medium")
+donor_data$hemoglobin_confidence_percent_cat <- relevel(factor(donor_data$hemoglobin_confidence_percent_cat), ref = "Medium")
+donor_data$ferritin_confidence_percent_cat <- relevel(factor(donor_data$ferritin_confidence_percent_cat), ref = "Medium")
+donor_data$ferritin_knowledge_percent_cat <- relevel(factor(donor_data$ferritin_knowledge_percent_cat), ref = "Medium")
+donor_data$ironsupplements_knowledge_percent_cat <- relevel(factor(donor_data$ironsupplements_knowledge_percent_cat), ref = "Medium")
+donor_data$ironsupplements_confidence_percent_cat <- relevel(factor(donor_data$ironsupplements_confidence_percent_cat), ref = "Medium")
+
+donor_data$Country <- relevel(factor(donor_data$Country), ref = "NL")
+```
+
+## CRUDE MODELS - IronSuppSanqCondition3
+```{r}
+
+# General knowledge domain - crude (beide hoofdeffecten)
+crude_general_3 <- glm(IronSuppSanqCondition3 ~ general_knowledge_percent_cat + general_confidence_percent_cat,
+                       data = donor_data, 
+                       family = binomial(link = "logit"))
+summary(crude_general_3)
+
+# Hemoglobin knowledge domain - crude (beide hoofdeffecten)
+crude_hemoglobin_3 <- glm(IronSuppSanqCondition3 ~ hemoglobin_knowledge_percent_cat + hemoglobin_confidence_percent_cat,
+                          data = donor_data, 
+                          family = binomial(link = "logit"))
+summary(crude_hemoglobin_3)
+
+# Ferritin knowledge domain - crude (beide hoofdeffecten)
+crude_ferritin_3 <- glm(IronSuppSanqCondition3 ~ ferritin_knowledge_percent_cat + ferritin_confidence_percent_cat,
+                        data = donor_data, 
+                        family = binomial(link = "logit"))
+summary(crude_ferritin_3)
+
+# Iron supplements knowledge domain - crude (beide hoofdeffecten)
+crude_iron_3 <- glm(IronSuppSanqCondition3 ~ ironsupplements_knowledge_percent_cat + ironsupplements_confidence_percent_cat,
+                    data = donor_data, 
+                    family = binomial(link = "logit"))
+summary(crude_iron_3)
+```
+
+## CRUDE MODELS - IronSuppSanqCondition4
+```{r}
+# General knowledge domain - crude (beide hoofdeffecten)
+crude_general_4 <- glm(IronSuppSanqCondition4 ~ general_knowledge_percent_cat + general_confidence_percent_cat,
+                      data = donor_data, 
+                      family = binomial(link = "logit"))
+summary(crude_general_4)
+
+# Hemoglobin knowledge domain - crude (beide hoofdeffecten)
+crude_hemoglobin_4 <- glm(IronSuppSanqCondition4 ~ hemoglobin_knowledge_percent_cat + hemoglobin_confidence_percent_cat,
+                         data = donor_data, 
+                         family = binomial(link = "logit"))
+summary(crude_hemoglobin_4)
+
+# Ferritin knowledge domain - crude (beide hoofdeffecten)
+crude_ferritin_4 <- glm(IronSuppSanqCondition4 ~ ferritin_knowledge_percent_cat + ferritin_confidence_percent_cat,
+                       data = donor_data, 
+                       family = binomial(link = "logit"))
+summary(crude_ferritin_4)
+
+# Iron supplements knowledge domain - crude (beide hoofdeffecten)
+crude_iron_4 <- glm(IronSuppSanqCondition4 ~ ironsupplements_knowledge_percent_cat + ironsupplements_confidence_percent_cat,
+                   data = donor_data, 
+                   family = binomial(link = "logit"))
+summary(crude_iron_4)
+```
+
+## CRUDE MODELS - IronSuppSanqCondition6
+```{r}
+# General knowledge domain - crude (beide hoofdeffecten)
+crude_general_6 <- glm(IronSuppSanqCondition6 ~ general_knowledge_percent_cat + general_confidence_percent_cat,
+                      data = donor_data, 
+                      family = binomial(link = "logit"))
+summary(crude_general_6)
+
+# Hemoglobin knowledge domain - crude (beide hoofdeffecten)
+crude_hemoglobin_6 <- glm(IronSuppSanqCondition6 ~ hemoglobin_knowledge_percent_cat + hemoglobin_confidence_percent_cat,
+                         data = donor_data, 
+                         family = binomial(link = "logit"))
+summary(crude_hemoglobin_6)
+
+# Ferritin knowledge domain - crude (beide hoofdeffecten)
+crude_ferritin_6 <- glm(IronSuppSanqCondition6 ~ ferritin_knowledge_percent_cat + ferritin_confidence_percent_cat,
+                       data = donor_data, 
+                       family = binomial(link = "logit"))
+summary(crude_ferritin_6)
+
+# Iron supplements knowledge domain - crude (beide hoofdeffecten)
+crude_iron_6 <- glm(IronSuppSanqCondition6 ~ ironsupplements_knowledge_percent_cat + ironsupplements_confidence_percent_cat,
+                   data = donor_data, 
+                   family = binomial(link = "logit"))
+summary(crude_iron_6)
+
+```
+
+## Print crude models
+```{r}
+# Print alle odds ratios voor crude modellen - Condition 3
+cat("\n\n===========================================================================")
+cat("\nCRUDE ANALYSES CONDITION 3 - ODDS RATIOS RESULTATEN")
+cat("\n===========================================================================")
+
+print_clear_OR_table(crude_general_3, "General Knowledge Domain - Condition 3")
+print_clear_OR_table(crude_hemoglobin_3, "Hemoglobin Knowledge Domain - Condition 3")
+print_clear_OR_table(crude_ferritin_3, "Ferritin Knowledge Domain - Condition 3")
+print_clear_OR_table(crude_iron_3, "Iron Supplements Knowledge Domain - Condition 3")
+
+# Print alle odds ratios voor crude modellen - Condition 4
+cat("\n\n===========================================================================")
+cat("\nCRUDE ANALYSES CONDITION 4 - ODDS RATIOS RESULTATEN")
+cat("\n===========================================================================")
+
+print_clear_OR_table(crude_general_4, "General Knowledge Domain - Condition 4")
+print_clear_OR_table(crude_hemoglobin_4, "Hemoglobin Knowledge Domain - Condition 4")
+print_clear_OR_table(crude_ferritin_4, "Ferritin Knowledge Domain - Condition 4")
+print_clear_OR_table(crude_iron_4, "Iron Supplements Knowledge Domain - Condition 4")
+
+# Print alle odds ratios voor crude modellen - Condition 6
+cat("\n\n===========================================================================")
+cat("\nCRUDE ANALYSES CONDITION 6 - ODDS RATIOS RESULTATEN")
+cat("\n===========================================================================")
+
+print_clear_OR_table(crude_general_6, "General Knowledge Domain - Condition 6")
+print_clear_OR_table(crude_hemoglobin_6, "Hemoglobin Knowledge Domain - Condition 6")
+print_clear_OR_table(crude_ferritin_6, "Ferritin Knowledge Domain - Condition 6")
+print_clear_OR_table(crude_iron_6, "Iron Supplements Knowledge Domain - Condition 6")
+```

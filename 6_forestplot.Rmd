@@ -1,0 +1,1504 @@
+---
+title: "Knowledge, Confidence, and Willingness to Accept Iron Supplementation Among Blood Donors Across Multiple Countries - 6"
+author: "A. Meulenbeld"
+date: "2025-07-04"
+output: html_document
+---
+```{r setup, include=FALSE}
+library(knitr)
+library(dplyr)
+
+opts_chunk$set(#results = 'asis',      # Can also be set at the chunk-level. IT IS NEEDED IN THE dfsummary chunck
+               comment = NA,
+               prompt  = FALSE,
+               cache   = FALSE,
+               echo = TRUE,
+               message = FALSE,
+               warning = FALSE,
+               width.cutoff=60
+)
+library(summarytools)
+st_options(plain.ascii = FALSE,        # Always use this option in Rmd documents
+           style        = "rmarkdown", # Always use this option in Rmd documents
+           footnote     = NA,          # Makes html-rendered results more concise
+           subtitle.emphasis = FALSE)  # Improves layout with some rmardown themes
+
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(summarytools)
+library(haven)
+library(patchwork)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(grid)
+library(cowplot)
+library(forcats)
+library(stringr)
+
+```
+
+# Open data
+```{r, data}
+donor_data <- readRDS("L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/2. Datasets/thesis_fleur/processed_data.rds")
+model_path <- "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/models/"
+```
+
+# Colours
+
+```{r}
+my_colors <- c("#C969A1FF","#CE4441FF", "#EE8577FF", "#EB7926FF", "#FFBB44FF","#859B6CFF", "#62929AFF", "#004F63FF", "#122451FF")
+```
+
+
+# Plots with interaction
+## Models
+```{r}
+model_general_3   <- readRDS(file = paste0(model_path, "model_general_3.rds"))
+model_hemoglobin_3 <- readRDS(file = paste0(model_path, "model_hemoglobin_3.rds"))
+model_ferritin_3   <- readRDS(file = paste0(model_path, "model_ferritin_3.rds"))
+model_iron_3       <- readRDS(file = paste0(model_path, "model_iron_3.rds"))
+
+model_general_4   <- readRDS(file = paste0(model_path, "model_general_4.rds"))
+model_hemoglobin_4 <- readRDS(file = paste0(model_path, "model_hemoglobin_4.rds"))
+model_ferritin_4   <- readRDS(file = paste0(model_path, "model_ferritin_4.rds"))
+model_iron_4       <- readRDS(file = paste0(model_path, "model_iron_4.rds"))
+
+model_general_6   <- readRDS(file = paste0(model_path, "model_general_6.rds"))
+model_hemoglobin_6 <- readRDS(file = paste0(model_path, "model_hemoglobin_6.rds"))
+model_ferritin_6   <- readRDS(file = paste0(model_path, "model_ferritin_6.rds"))
+model_iron_6       <- readRDS(file = paste0(model_path, "model_iron_6.rds"))
+```
+
+
+```{r}
+# Functie om relevante OR gegevens voor kennisdomeinen, confidence en interactie uit een model te extraheren
+extract_model_dummies <- function(model, domain_prefix) {
+  # Bereken odds ratios
+  OR <- exp(coef(model))
+  
+  # Bereken betrouwbaarheidsintervallen
+  CI <- exp(confint.default(model))
+  
+  # Haal alle variabelenamen op
+  var_names <- names(coef(model))
+  
+  # Selecteer alleen de relevante termen
+  # Kennis en confidence termen (zonder interacties)
+  knowledge_terms <- grep(paste0("^", domain_prefix, "_knowledge_percent_cat"), var_names, value = TRUE)
+  knowledge_terms <- knowledge_terms[!grepl(":", knowledge_terms)]  # Exclude interaction terms
+  
+  confidence_terms <- grep(paste0("^", domain_prefix, "_confidence_percent_cat"), var_names, value = TRUE)
+  confidence_terms <- confidence_terms[!grepl(":", confidence_terms)]  # Exclude interaction terms
+  
+  # Alleen knowledge × confidence interacties (geen Sex interacties)
+  pattern <- paste0(domain_prefix, "_knowledge_percent_cat(Low|High):", domain_prefix, "_confidence_percent_cat(Low|High)")
+  interaction_terms <- grep(pattern, var_names, value = TRUE)
+  
+  # Filter eventuele interacties met Sex uit de termen
+  interaction_terms <- interaction_terms[!grepl("Sex", interaction_terms)]
+  
+  # Combineer alle relevante termen
+  all_terms <- c(knowledge_terms, confidence_terms, interaction_terms)
+  
+  # Creëer een dataframe met alle relevante OR-gegevens
+  if (length(all_terms) > 0) {
+    result <- data.frame(
+      term = all_terms,
+      OR = OR[all_terms],
+      CI_lower = CI[all_terms, 1],
+      CI_upper = CI[all_terms, 2],
+      stringsAsFactors = FALSE
+    )
+    
+    # Extraheer de categorieën voor duidelijkere labels
+    # Voor knowledge en confidence termen
+    result$knowledge_cat <- NA
+    result$confidence_cat <- NA
+    
+    # Haal categorieën op voor knowledge termen
+    knowledge_idx <- grepl(paste0("^", domain_prefix, "_knowledge_percent_cat"), result$term) & !grepl(":", result$term)
+    if (any(knowledge_idx)) {
+      result$knowledge_cat[knowledge_idx] <- str_extract(result$term[knowledge_idx], "(Low|High)")
+    }
+    
+    # Haal categorieën op voor confidence termen
+    confidence_idx <- grepl(paste0("^", domain_prefix, "_confidence_percent_cat"), result$term) & !grepl(":", result$term)
+    if (any(confidence_idx)) {
+      result$confidence_cat[confidence_idx] <- str_extract(result$term[confidence_idx], "(Low|High)")
+    }
+    
+    # Voor interacties, haal beide categorieën op
+    interaction_idx <- grepl(":", result$term)
+    if (any(interaction_idx)) {
+      # Extraheer kennis categorie uit interactieterm
+      result$knowledge_cat[interaction_idx] <- str_extract(result$term[interaction_idx], 
+                                                        paste0(domain_prefix, "_knowledge_percent_cat(Low|High)")) %>%
+                                            str_extract("(Low|High)")
+      
+      # Extraheer confidence categorie uit interactieterm
+      result$confidence_cat[interaction_idx] <- str_extract(result$term[interaction_idx], 
+                                                         paste0(domain_prefix, "_confidence_percent_cat(Low|High)")) %>%
+                                             str_extract("(Low|High)")
+    }
+    
+    # Maak compacte labels (alleen categorienamen, geen "Knowledge:" of "Confidence:")
+    result$display_name <- NA
+    
+    # Voor knowledge en confidence termen
+    knowledge_only <- !is.na(result$knowledge_cat) & is.na(result$confidence_cat)
+    result$display_name[knowledge_only] <- result$knowledge_cat[knowledge_only]
+    
+    confidence_only <- is.na(result$knowledge_cat) & !is.na(result$confidence_cat)
+    result$display_name[confidence_only] <- result$confidence_cat[confidence_only]
+    
+    # Voor interacties - compact formaat: "Low x Low"
+    interaction_rows <- !is.na(result$knowledge_cat) & !is.na(result$confidence_cat)
+    result$display_name[interaction_rows] <- paste0(result$knowledge_cat[interaction_rows], 
+                                               " × ", result$confidence_cat[interaction_rows])
+    
+    # Bepaal het type term
+    result$type <- ifelse(interaction_rows, "Interaction",
+                    ifelse(knowledge_only, "Knowledge", "Confidence"))
+    
+    return(result)
+  } else {
+    return(NULL)
+  }
+}
+
+# Functie om een forest plot te maken voor een specifiek model
+create_single_forest_plot <- function(model, domain_name, condition_number, domain_prefix) {
+  # Vastgestelde x-as grenzen volgens verzoek
+  global_x_min <- 0.10
+  global_x_max <- 10
+  
+  # Extracteer de gegevens voor dit model
+  model_data <- extract_model_dummies(model, domain_prefix)
+  
+  if (is.null(model_data) || nrow(model_data) == 0) {
+    warning(paste("Geen gegevens gevonden voor domein", domain_name, "conditie", condition_number))
+    return(NULL)
+  }
+  
+  # Bepaal significante effecten (CI kruist niet 1)
+  model_data$significant <- !(model_data$CI_lower < 1 & model_data$CI_upper > 1)
+  
+  # Orden op type (Knowledge, Confidence, Interaction)
+  model_data$type <- factor(model_data$type, levels = c("Knowledge", "Confidence", "Interaction"))
+  
+  # Zorg voor consistente sortering
+  model_data <- model_data %>%
+    arrange(type, desc(display_name)) %>% 
+    mutate(y_pos = n():1)  
+  
+  # Titels op basis van conditienummer
+  condition_titles <- list(
+    "3" = "I would consider using iron supplements if this allow me to keep donating",
+    "4" = "I would consider using iron supplements if advised by a donor physician",
+    "6" = "I would not be willing to use iron supplements if provided by the blood service"
+  )
+  
+  condition_title <- condition_titles[[as.character(condition_number)]]
+  
+  # Zorg ervoor dat alle CI's binnen de schaal vallen (maar niet lager dan 0.1 of hoger dan 10)
+  model_data$plot_CI_lower <- pmax(global_x_min, model_data$CI_lower)
+  model_data$plot_CI_upper <- pmin(global_x_max, model_data$CI_upper)
+  
+  # Maak de forest plot - eenvoudig en direct
+  forest_plot <- ggplot(model_data, aes(x = OR, y = y_pos)) +
+    # Verticale lijn bij OR = 1
+    geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
+    
+    # Foutbalken
+    geom_errorbarh(aes(xmin = plot_CI_lower, xmax = plot_CI_upper, color = type), height = 0.2) +
+    
+    # Punten
+    geom_point(aes(color = type, shape = significant), size = 3) +
+    
+    # Schaal en uiterlijk met aangepaste limieten
+    scale_shape_manual(values = c("FALSE" = 1, "TRUE" = 19), guide = "none") +
+    scale_x_continuous(trans = "log10", 
+                     limits = c(global_x_min, global_x_max),
+                     breaks = c(0.1, 0.25, 0.5, 1, 2, 5, 10)) +
+    scale_color_manual(values = c("Knowledge" = my_colors[4], 
+                                  "Confidence" = my_colors[7], 
+                                  "Interaction" = my_colors[6])) +
+    
+    # Gebruik scale_y_continuous met expliciete breaks en labels
+    scale_y_continuous(
+      breaks = model_data$y_pos,          
+      labels = model_data$display_name,    
+      sec.axis = dup_axis(name = NULL, labels = NULL)  
+    ) +
+    
+    # Labels
+    labs(
+      title = paste("Odds Ratios for", domain_name, "Domain - Statement", condition_number),
+      subtitle = condition_title,
+      x = "Odds Ratio (95% CI, log scale)",
+      y = NULL
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank(),
+      legend.position = "none",
+      axis.text.y = element_text(size = 10, face = "plain", hjust = 1),
+      plot.margin = margin(t = 20, r = 20, b = 20, l = 20)
+    )
+  
+  return(forest_plot)
+}
+
+# Maak forest plots voor conditie 3 met interacties (origineel)
+plot_general_3_with_int <- create_single_forest_plot(model_general_3, "General", 3, "general")
+plot_hemoglobin_3_with_int <- create_single_forest_plot(model_hemoglobin_3, "Hemoglobin", 3, "hemoglobin")
+plot_ferritin_3_with_int <- create_single_forest_plot(model_ferritin_3, "Ferritin", 3, "ferritin")
+plot_iron_3_with_int <- create_single_forest_plot(model_iron_3, "Iron Supplements", 3, "ironsupplements")
+
+# Print de plots voor conditie 3 met interacties
+if (!is.null(plot_general_3_with_int)) print(plot_general_3_with_int)
+if (!is.null(plot_hemoglobin_3_with_int)) print(plot_hemoglobin_3_with_int)
+if (!is.null(plot_ferritin_3_with_int)) print(plot_ferritin_3_with_int)
+if (!is.null(plot_iron_3_with_int)) print(plot_iron_3_with_int)
+
+# Maak forest plots voor conditie 4 met interacties (origineel)
+plot_general_4_with_int <- create_single_forest_plot(model_general_4, "General", 4, "general")
+plot_hemoglobin_4_with_int <- create_single_forest_plot(model_hemoglobin_4, "Hemoglobin", 4, "hemoglobin")
+plot_ferritin_4_with_int <- create_single_forest_plot(model_ferritin_4, "Ferritin", 4, "ferritin")
+plot_iron_4_with_int <- create_single_forest_plot(model_iron_4, "Iron Supplements", 4, "ironsupplements")
+
+# Print de plots voor conditie 4 met interacties
+if (!is.null(plot_general_4_with_int)) print(plot_general_4_with_int)
+if (!is.null(plot_hemoglobin_4_with_int)) print(plot_hemoglobin_4_with_int)
+if (!is.null(plot_ferritin_4_with_int)) print(plot_ferritin_4_with_int)
+if (!is.null(plot_iron_4_with_int)) print(plot_iron_4_with_int)
+
+plot_general_6_with_int <- create_single_forest_plot(model_general_6, "General", 6, "general")
+plot_hemoglobin_6_with_int <- create_single_forest_plot(model_hemoglobin_6, "Hemoglobin", 6, "hemoglobin")
+plot_ferritin_6_with_int <- create_single_forest_plot(model_ferritin_6, "Ferritin", 6, "ferritin")
+plot_iron_6_with_int <- create_single_forest_plot(model_iron_6, "Iron Supplements", 6, "ironsupplements")
+
+# Print de plots voor conditie 6 met interacties
+if (!is.null(plot_general_6_with_int)) print(plot_general_6_with_int)
+if (!is.null(plot_hemoglobin_6_with_int)) print(plot_hemoglobin_6_with_int)
+if (!is.null(plot_ferritin_6_with_int)) print(plot_ferritin_6_with_int)
+if (!is.null(plot_iron_6_with_int)) print(plot_iron_6_with_int)
+
+
+```
+
+# Plot without interaction
+## Models
+```{r}
+model_general_3_centered   <- readRDS(file = paste0(model_path, "model_general_3_centered.rds"))
+model_hemoglobin_3_centered <- readRDS(file = paste0(model_path, "model_hemoglobin_3_centered.rds"))
+model_ferritin_3_centered   <- readRDS(file = paste0(model_path, "model_ferritin_3_centered.rds"))
+model_iron_3_centered       <- readRDS(file = paste0(model_path, "model_iron_3_centered.rds"))
+
+model_general_4_centered   <- readRDS(file = paste0(model_path, "model_general_4_centered.rds"))
+model_hemoglobin_4_centered <- readRDS(file = paste0(model_path, "model_hemoglobin_4_centered.rds"))
+model_ferritin_4_centered   <- readRDS(file = paste0(model_path, "model_ferritin_4_centered.rds"))
+model_iron_4_centered       <- readRDS(file = paste0(model_path, "model_iron_4_centered.rds"))
+
+model_general_6_centered   <- readRDS(file = paste0(model_path, "model_general_6_centered.rds"))
+model_hemoglobin_6_centered <- readRDS(file = paste0(model_path, "model_hemoglobin_6_centered.rds"))
+model_ferritin_6_centered   <- readRDS(file = paste0(model_path, "model_ferritin_6_centered.rds"))
+model_iron_6_centered       <- readRDS(file = paste0(model_path, "model_iron_6_centered.rds"))
+```
+
+## Plots
+```{r}
+
+# Functie om relevante OR gegevens voor kennisdomeinen en confidence uit een model te extraheren
+# Zonder interactietermen en met medium als referentiecategorie
+extract_model_dummies_no_interaction <- function(model, domain_prefix) {
+  # Bereken odds ratios
+  OR <- exp(coef(model))
+  
+  # Bereken betrouwbaarheidsintervallen
+  CI <- exp(confint.default(model))
+  
+  # Haal alle variabelenamen op
+  var_names <- names(coef(model))
+  
+  # Selecteer alleen de relevante termen (zonder interacties)
+  # Kennis en confidence termen (zonder interacties)
+  knowledge_terms <- grep(paste0("^", domain_prefix, "_knowledge_percent_cat"), var_names, value = TRUE)
+  knowledge_terms <- knowledge_terms[!grepl(":", knowledge_terms)]  # Exclude interaction terms
+  
+  confidence_terms <- grep(paste0("^", domain_prefix, "_confidence_percent_cat"), var_names, value = TRUE)
+  confidence_terms <- confidence_terms[!grepl(":", confidence_terms)]  # Exclude interaction terms
+  
+  # Combineer alle relevante termen
+  all_terms <- c(knowledge_terms, confidence_terms)
+  
+  # Creëer een dataframe met alle relevante OR-gegevens
+  if (length(all_terms) > 0) {
+    result <- data.frame(
+      term = all_terms,
+      OR = OR[all_terms],
+      CI_lower = CI[all_terms, 1],
+      CI_upper = CI[all_terms, 2],
+      stringsAsFactors = FALSE
+    )
+    
+    # Extraheer de categorieën voor duidelijkere labels
+    result$knowledge_cat <- NA
+    result$confidence_cat <- NA
+    
+    # Haal categorieën op voor knowledge termen
+    knowledge_idx <- grepl(paste0("^", domain_prefix, "_knowledge_percent_cat"), result$term)
+    if (any(knowledge_idx)) {
+      result$knowledge_cat[knowledge_idx] <- str_extract(result$term[knowledge_idx], "(Low|High)")
+    }
+    
+    # Haal categorieën op voor confidence termen
+    confidence_idx <- grepl(paste0("^", domain_prefix, "_confidence_percent_cat"), result$term)
+    if (any(confidence_idx)) {
+      result$confidence_cat[confidence_idx] <- str_extract(result$term[confidence_idx], "(Low|High)")
+    }
+    
+    # Maak compacte labels (alleen categorienamen)
+    result$display_name <- NA
+    
+    # Voor knowledge termen
+    knowledge_only <- !is.na(result$knowledge_cat) & is.na(result$confidence_cat)
+    result$display_name[knowledge_only] <- result$knowledge_cat[knowledge_only]
+    
+    # Voor confidence termen
+    confidence_only <- is.na(result$knowledge_cat) & !is.na(result$confidence_cat)
+    result$display_name[confidence_only] <- result$confidence_cat[confidence_only]
+    
+    # Bepaal het type term
+    result$type <- ifelse(knowledge_only, "Knowledge", "Confidence")
+    
+    return(result)
+  } else {
+    return(NULL)
+  }
+}
+
+# Functie om een forest plot te maken voor een specifiek model zonder interacties
+create_forest_plot_no_interaction <- function(model, domain_name, condition_number, domain_prefix) {
+  # x-axis
+  global_x_min <- 0.25
+  global_x_max <- 5
+  
+  # Extracteer de gegevens voor dit model
+  model_data <- extract_model_dummies_no_interaction(model, domain_prefix)
+  
+  if (is.null(model_data) || nrow(model_data) == 0) {
+    warning(paste("Geen gegevens gevonden voor domein", domain_name, "conditie", condition_number))
+    return(NULL)
+  }
+   
+  # Bepaal significante effecten (CI kruist niet 1)
+  model_data$significant <- !(model_data$CI_lower < 1 & model_data$CI_upper > 1)
+  
+  # Voor consistente sortering
+  model_data <- model_data %>%
+    mutate(type_order = case_when(
+      type == "Knowledge" ~ 1,
+      type == "Confidence" ~ 2,
+      TRUE ~ 3
+    )) %>%
+    arrange(type_order, display_name) %>% 
+    mutate(y_pos = n():1)
+  
+   model_data$lower_truncated <- model_data$CI_lower < global_x_min
+   model_data$upper_truncated <- model_data$CI_upper > global_x_max
+   
+   model_data$color_code <- ifelse(model_data$type == "Knowledge", my_colors[4], my_colors[7])
+  
+  # Titels op basis van conditienummer
+  condition_titles <- list(
+    "3" = "I would consider using iron supplements if this allows me to keep donating",
+    "4" = "I would consider using iron supplements if advised by a donor physician",
+    "6" = "I would not be willing to use iron supplements if provided by the blood service"
+  )
+  
+  condition_title <- condition_titles[[as.character(condition_number)]]
+  
+  # Zorg ervoor dat alle CI's binnen de schaal vallen
+  model_data$plot_CI_lower <- pmax(global_x_min, model_data$CI_lower)
+  model_data$plot_CI_upper <- pmin(global_x_max, model_data$CI_upper)
+  
+# Maak de forest plot
+forest_plot <- ggplot(model_data, aes(x = OR, y = y_pos)) +
+  # Verticale lijn bij OR = 1
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
+  
+  # Foutbalken
+  geom_errorbarh(aes(xmin = plot_CI_lower, xmax = plot_CI_upper, color = type), height = 0.2) +
+  
+  # Punten
+  geom_point(aes(color = type, shape = significant), size = 1.5) +
+  
+  # Schaal en uiterlijk met aangepaste limieten
+  scale_shape_manual(values = c("FALSE" = 1, "TRUE" = 19), guide = "none") +
+  scale_x_continuous(trans = "log10", 
+                  limits = c(global_x_min, global_x_max),
+                  breaks = c(0.1, 0.25, 0.5, 1, 2, 5, 10)) +
+  scale_color_manual(values = c("Knowledge" = my_colors[4], 
+                                "Confidence" = my_colors[7])) +
+
+  # Verbeterde versie voor de y-as labels
+  scale_y_continuous(
+    breaks = model_data$y_pos,
+    labels = function(y) {
+      result <- character(length(y))
+      for (i in seq_along(y)) {
+        idx <- which(model_data$y_pos == y[i])
+        if (length(idx) > 0) {
+          if (model_data$type[idx] == "Knowledge") {
+            result[i] <- paste0(model_data$display_name[idx], " Knowledge")
+          } else if (model_data$type[idx] == "Confidence") {
+            result[i] <- paste0(model_data$display_name[idx], " Confidence")
+          } else {
+            result[i] <- as.character(model_data$display_name[idx])
+          }
+        } else {
+          result[i] <- ""
+        }
+      }
+      return(result)
+    },
+    sec.axis = dup_axis(name = NULL, labels = NULL)
+  ) +
+  
+  # Labels
+  labs(
+    title = paste("Odds Ratios for", domain_name, "Domain - Statement", condition_number),
+    subtitle = condition_title,
+    x = "Odds Ratio (95% CI, log scale)",
+    y = NULL) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank(),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    axis.text.y = element_text(size = 10, face = "plain", hjust = 1),
+    plot.margin = margin(t = 20, r = 20, b = 20, l = 20),
+    plot.caption = element_text(hjust = 0, face = "italic")
+  )
+
+ #arrows
+  if (any(model_data$lower_truncated)) {
+  arrow_data_left <- model_data[model_data$lower_truncated, ]
+  forest_plot <- forest_plot +
+    geom_segment(
+      data = arrow_data_left,
+      aes(x = global_x_min + 0.01, xend = global_x_min, y = y_pos, yend = y_pos, color = NULL),
+      arrow = arrow(length = unit(0.15, "cm"), type = "closed"),
+      size = 0.3,
+      color = arrow_data_left$color_code  
+    )
+}
+if (any(model_data$upper_truncated)) {
+  arrow_data_right <- model_data[model_data$upper_truncated, ]
+  forest_plot <- forest_plot +
+    geom_segment(
+      data = arrow_data_right,
+      aes(x = global_x_max - 0.1, xend = global_x_max, y = y_pos, yend = y_pos, color = NULL),
+      arrow = arrow(length = unit(0.15, "cm"), type = "closed"),
+      size = 0.3,
+      color = arrow_data_right$color_code
+    )
+}
+
+  return(forest_plot)
+}
+
+# Statement 3 met gecentreerde modellen
+plot_general_3_centered <- create_forest_plot_no_interaction(model_general_3_centered, "General", 3, "general")
+plot_hemoglobin_3_centered <- create_forest_plot_no_interaction(model_hemoglobin_3_centered, "Hemoglobin", 3, "hemoglobin")
+plot_ferritin_3_centered <- create_forest_plot_no_interaction(model_ferritin_3_centered, "Ferritin", 3, "ferritin")
+plot_iron_3_centered <- create_forest_plot_no_interaction(model_iron_3_centered, "Iron Supplements", 3, "ironsupplements")
+
+if (!is.null(plot_general_3_centered)) print(plot_general_3_centered)
+if (!is.null(plot_hemoglobin_3_centered)) print(plot_hemoglobin_3_centered)
+if (!is.null(plot_ferritin_3_centered)) print(plot_ferritin_3_centered)
+if (!is.null(plot_iron_3_centered)) print(plot_iron_3_centered)
+
+# statement 4 met gecentreerde modellen
+plot_general_4_centered <- create_forest_plot_no_interaction(model_general_4_centered, "General", 4, "general")
+plot_hemoglobin_4_centered <- create_forest_plot_no_interaction(model_hemoglobin_4_centered, "Hemoglobin", 4, "hemoglobin")
+plot_ferritin_4_centered <- create_forest_plot_no_interaction(model_ferritin_4_centered, "Ferritin", 4, "ferritin")
+plot_iron_4_centered <- create_forest_plot_no_interaction(model_iron_4_centered, "Iron Supplements", 4, "ironsupplements")
+
+if (!is.null(plot_general_4_centered)) print(plot_general_4_centered)
+if (!is.null(plot_hemoglobin_4_centered)) print(plot_hemoglobin_4_centered)
+if (!is.null(plot_ferritin_4_centered)) print(plot_ferritin_4_centered)
+if (!is.null(plot_iron_4_centered)) print(plot_iron_4_centered)
+
+# statement 6 met gecentreerde modellen
+plot_general_6_centered <- create_forest_plot_no_interaction(model_general_6_centered, "General", 6, "general")
+plot_hemoglobin_6_centered <- create_forest_plot_no_interaction(model_hemoglobin_6_centered, "Hemoglobin", 6, "hemoglobin")
+plot_ferritin_6_centered <- create_forest_plot_no_interaction(model_ferritin_6_centered, "Ferritin", 6, "ferritin")
+plot_iron_6_centered <- create_forest_plot_no_interaction(model_iron_6_centered, "Iron Supplements", 6, "ironsupplements")
+
+# Statement 6 met gecentreerde modellen
+if (!is.null(plot_general_6_centered)) print(plot_general_6_centered)
+if (!is.null(plot_hemoglobin_6_centered)) print(plot_hemoglobin_6_centered)
+if (!is.null(plot_ferritin_6_centered)) print(plot_ferritin_6_centered)
+if (!is.null(plot_iron_6_centered)) print(plot_iron_6_centered)
+```
+
+
+## lay out in grid
+```{r}
+#grid function
+format_for_grid <- function(plot, show_y_axis = TRUE, show_x_axis = FALSE, add_title = NULL) {
+  # Remove individual plot titles and adjust theme for grid layout
+  plot_modified <- plot +
+    theme(
+      plot.title = element_blank(),
+      plot.subtitle = element_blank(),
+      legend.position = "none",
+      axis.title.x = element_blank(),
+      axis.text.x = if(show_x_axis) element_text(size = 8) else element_blank(),
+      axis.title.y = element_blank(),
+      axis.text.y = if(show_y_axis) element_text(size = 8) else element_blank(),
+      plot.margin = margin(2, 2, 2, 2)
+    )
+
+  # Add title as a small annotation if provided
+  if(!is.null(add_title)) {
+    plot_modified <- plot_modified +
+      annotate("text", x = 0.27, y = max(ggplot_build(plot)$layout$panel_params[[1]]$y.range),
+               label = add_title, hjust = 0, vjust = 1,
+               size = 3, fontface = "bold")
+  }
+
+  return(plot_modified)
+}
+
+# Format all plots for grid layout using the centered model plots
+# Statement 3 (row 1) - log scale ON 
+general_3_grid <- format_for_grid(plot_general_3_centered, show_y_axis = TRUE, show_x_axis = TRUE)
+hemoglobin_3_grid <- format_for_grid(plot_hemoglobin_3_centered, show_y_axis = FALSE, show_x_axis = TRUE)
+ferritin_3_grid <- format_for_grid(plot_ferritin_3_centered, show_y_axis = FALSE, show_x_axis = TRUE)
+iron_3_grid <- format_for_grid(plot_iron_3_centered, show_y_axis = FALSE, show_x_axis = TRUE)
+
+# Statement 4 (row 2) - log scale ON 
+general_4_grid <- format_for_grid(plot_general_4_centered, show_y_axis = TRUE, show_x_axis = TRUE)
+hemoglobin_4_grid <- format_for_grid(plot_hemoglobin_4_centered, show_y_axis = FALSE, show_x_axis = TRUE)
+ferritin_4_grid <- format_for_grid(plot_ferritin_4_centered, show_y_axis = FALSE, show_x_axis = TRUE)
+iron_4_grid <- format_for_grid(plot_iron_4_centered, show_y_axis = FALSE, show_x_axis = TRUE)
+
+# Statement 6 (row 3) - log scale ON 
+general_6_grid <- format_for_grid(plot_general_6_centered, show_y_axis = TRUE, show_x_axis = TRUE)
+hemoglobin_6_grid <- format_for_grid(plot_hemoglobin_6_centered, show_y_axis = FALSE, show_x_axis = TRUE)
+ferritin_6_grid <- format_for_grid(plot_ferritin_6_centered, show_y_axis = FALSE, show_x_axis = TRUE)
+iron_6_grid <- format_for_grid(plot_iron_6_centered, show_y_axis = FALSE, show_x_axis = TRUE)
+
+
+# Create column headers for domains
+domain_header_general <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Blood Policy", hjust = 0.5, size = 3) +
+  theme_void()
+
+domain_header_hemoglobin <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Hemoglobin", hjust = 0.5, size = 3) +
+  theme_void()
+
+domain_header_ferritin <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Ferritin", hjust = 0.5, size = 3) +
+  theme_void()
+
+domain_header_iron <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Iron Supplements", hjust = 0.5, size = 3) +
+  theme_void()
+
+
+statement3_title <- ggplot() +
+  annotate("text", x = -0.5, y = 0.5,
+           label = "Willingness in scenario 1:\nI would consider using iron supplements if this allows me to keep donating",
+           hjust = 0, size = 3, fontface = "italic") +
+  theme_void() +
+  xlim(-0.5, 1) +
+  ylim(0, 1) + 
+  theme(plot.margin = margin(5, 0, 5, 10, "pt"))
+
+statement4_title <- ggplot() +
+  annotate("text", x = -0.5, y = 0.5,
+           label = "Willingness in scenario 2:\nI would consider using iron supplements if advised by a donor physician",
+           hjust = 0, size = 3, fontface = "italic") +
+  theme_void() +
+  xlim(-0.5, 1) +
+  ylim(0, 1) +  
+  theme(plot.margin = margin(5, 0, 5, 10, "pt"))
+
+statement6_title <- ggplot() +
+  annotate("text", x = -0.5, y = 0.5,
+           label = "Willingness in scenario 3:\nI would not be willing to use iron supplements if provided by the blood service",
+           hjust = 0, size = 3, fontface = "italic") +
+  theme_void() +
+  xlim(-0.5, 1) +
+  ylim(0, 1) +  
+  theme(plot.margin = margin(5, 0, 5, 10, "pt"))
+
+#x-axis
+x_axis_label <- ggplot() +
+  annotate("text", x = 0, y = 0,
+           label = "Odds Ratio (95% CI, log scale)",
+           hjust = 0.5, size = 3) +
+  theme_void() +
+  xlim(-1, 1) +  # Add xlim to ensure there's enough space for the text
+  ylim(-0.5, 0.5) +  # Add ylim to ensure there's enough vertical space
+  theme(plot.margin = margin(5, 10, 5, 10, "pt"))  # Add margins to prevent cutting off
+
+# Assemble the grid with patchwork
+# First the domain headers
+header_row <- domain_header_general | domain_header_hemoglobin | domain_header_ferritin | domain_header_iron
+
+# Add the statement rows and their titles
+# Make the statement title rows span the full width 
+row1_title <- statement3_title + plot_layout(width = 4)
+row1 <- general_3_grid | hemoglobin_3_grid | ferritin_3_grid | iron_3_grid
+
+row2_title <- statement4_title + plot_layout(width = 4)
+row2 <- general_4_grid | hemoglobin_4_grid | ferritin_4_grid | iron_4_grid
+
+row3_title <- statement6_title + plot_layout(width = 4)
+row3 <- general_6_grid | hemoglobin_6_grid | ferritin_6_grid | iron_6_grid
+
+# De handmatig gemaakte legenda toevoegen
+create_manual_legend <- function() {
+  # Dummy data just to trigger the legend
+  legend_data <- data.frame(
+    Category = factor(c("Yes", "No"), levels = c("Yes", "No"))
+  )
+
+  shape_map <- c("Yes" = 1, "No" = 16)  # Open and filled circles
+
+  ggplot() +
+    geom_point(data = legend_data, 
+               aes(x = 1, y = 1, shape = Category), 
+               size = 0, alpha = 0) +  # Invisible dummy points
+    scale_shape_manual(values = shape_map) +
+    guides(shape = guide_legend(
+      title = "Statistical significance (p < 0.05)",
+      override.aes = list(size = 2, color = "black", alpha = 1),
+      direction = "horizontal",
+      title.position = "left",
+      label.position = "right"
+    )) +
+    theme_void() +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.title = element_text(size = 9, face="bold"),
+      legend.text = element_text(size = 8),
+      legend.margin = margin(0,0,0,0),
+      plot.margin = margin(0, 0, 0, 0)
+    )
+}
+
+
+# Create legend object
+manual_legend <- create_manual_legend()
+legend_row <- manual_legend + plot_layout(width = 4)
+
+# The x-axis label
+x_axis_row <- x_axis_label
+
+# Create Knowledge topics header
+knowledge_topics_header <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Odds for willingness by scenario and knowledge topic", hjust = 0.5, size = 3.5, fontface = "bold") +
+  theme_void()
+
+#final plot
+final_plot <- (knowledge_topics_header / header_row / row1_title / row1 / row2_title / row2 / row3_title / row3 / x_axis_row/ legend_row) +
+  plot_layout(heights = c(0.7, 0.8, 1, 3, 1, 3, 1, 3, 0.6, 0.1))
+
+print(final_plot)
+
+#save plot with ggsave
+ggsave(final_plot, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure3.png", bg="white", height = 6, width = 9)
+```
+
+# Grid layout of models with interactions
+
+```{r}
+# Format interaction plots for grid layout
+general_3_with_int_grid <- format_for_grid(plot_general_3_with_int, show_y_axis = TRUE, show_x_axis = TRUE)
+hemoglobin_3_with_int_grid <- format_for_grid(plot_hemoglobin_3_with_int, show_y_axis = FALSE, show_x_axis = TRUE)
+ferritin_3_with_int_grid <- format_for_grid(plot_ferritin_3_with_int, show_y_axis = FALSE, show_x_axis = TRUE)
+iron_3_with_int_grid <- format_for_grid(plot_iron_3_with_int, show_y_axis = FALSE, show_x_axis = TRUE)
+
+general_4_with_int_grid <- format_for_grid(plot_general_4_with_int, show_y_axis = TRUE, show_x_axis = TRUE)
+hemoglobin_4_with_int_grid <- format_for_grid(plot_hemoglobin_4_with_int, show_y_axis = FALSE, show_x_axis = TRUE)
+ferritin_4_with_int_grid <- format_for_grid(plot_ferritin_4_with_int, show_y_axis = FALSE, show_x_axis = TRUE)
+iron_4_with_int_grid <- format_for_grid(plot_iron_4_with_int, show_y_axis = FALSE, show_x_axis = TRUE)
+
+general_6_with_int_grid <- format_for_grid(plot_general_6_with_int, show_y_axis = TRUE, show_x_axis = TRUE)
+hemoglobin_6_with_int_grid <- format_for_grid(plot_hemoglobin_6_with_int, show_y_axis = FALSE, show_x_axis = TRUE)
+ferritin_6_with_int_grid <- format_for_grid(plot_ferritin_6_with_int, show_y_axis = FALSE, show_x_axis = TRUE)
+iron_6_with_int_grid <- format_for_grid(plot_iron_6_with_int, show_y_axis = FALSE, show_x_axis = TRUE)
+
+# Titles reused from previous block (statement3_title, etc.)
+
+
+# Header and legend reuse
+header_row_int <- domain_header_general | domain_header_hemoglobin | domain_header_ferritin | domain_header_iron
+row1_int <- general_3_with_int_grid | hemoglobin_3_with_int_grid | ferritin_3_with_int_grid | iron_3_with_int_grid
+row2_int <- general_4_with_int_grid | hemoglobin_4_with_int_grid | ferritin_4_with_int_grid | iron_4_with_int_grid
+row3_int <- general_6_with_int_grid | hemoglobin_6_with_int_grid | ferritin_6_with_int_grid | iron_6_with_int_grid
+
+#add another legend
+
+create_color_legend <- function() {
+  legend_data <- data.frame(
+    Category = factor(c("Knowledge", "Confidence", "Interaction"))
+  )
+
+  col_map <- c(
+    "Knowledge" = my_colors[4],
+    "Confidence" = my_colors[7],
+    "Interaction" = my_colors[6]
+  )
+
+  ggplot(legend_data, aes(x = Category, y = Category, color = Category)) +
+    geom_point(size = 0, shape = 16, alpha=0) +
+    scale_color_manual(values = col_map) +
+    guides(colour = guide_legend(
+      title = "Variable",
+      override.aes = list(size = 3, alpha = 1),
+      direction = "horizontal",
+      title.position = "left",
+      label.position = "right"
+    )) +
+    theme_void() +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.title = element_text(size = 9, face = "bold"),
+      legend.text = element_text(size = 8),
+      plot.margin = margin(0, 0, 0, 0)
+    )
+}
+
+# Create legend object
+colour_legend <- create_color_legend()
+col_legend_row <- colour_legend + plot_layout(width = 4)
+
+# Final grid layout with interactions
+final_plot_interactions <- (knowledge_topics_header / header_row_int / 
+                            row1_title / row1_int / 
+                            row2_title / row2_int / 
+                            row3_title / row3_int / 
+                            x_axis_row / legend_row / col_legend_row) +
+  plot_layout(heights = c(0.7, 0.8, 1, 3, 1, 3, 1, 3, 0.6, 0.1, 0.1))
+
+# Show plot
+print(final_plot_interactions)
+
+# Save to file
+ggsave(final_plot_interactions,
+       file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/appendix_interactions.png",
+       bg = "white", height = 10, width = 9)
+
+```
+
+
+# Total forest plot
+
+```{r}
+
+# Function to extract relevant OR data for all requested variables from a model
+# Without interaction terms and with medium as reference category
+extract_model_effects <- function(model, domain_prefix) {
+  # Calculate odds ratios
+  OR <- exp(coef(model))
+  
+  # Calculate confidence intervals
+  CI <- exp(confint.default(model))
+  
+  # Get all variable names
+  var_names <- names(coef(model))
+  
+  # Select all relevant terms (without interactions)
+  # Knowledge and confidence terms
+  knowledge_terms <- grep(paste0("^", domain_prefix, "_knowledge_percent_cat"), var_names, value = TRUE)
+  knowledge_terms <- knowledge_terms[!grepl(":", knowledge_terms)]  # Exclude interaction terms
+  
+  confidence_terms <- grep(paste0("^", domain_prefix, "_confidence_percent_cat"), var_names, value = TRUE)
+  confidence_terms <- confidence_terms[!grepl(":", confidence_terms)]  # Exclude interaction terms
+  
+  # Country terms
+  country_terms <- grep("^Country", var_names, value = TRUE)
+  country_terms <- country_terms[!grepl(":", country_terms)]  # Exclude interaction terms
+  
+  # Sex terms (only main effect, no interactions)
+  sex_terms <- grep("^Sex", var_names, value = TRUE)
+  sex_terms <- sex_terms[!grepl(":", sex_terms)]  # Exclude interaction terms
+  
+  # Prior iron use
+  iron_use_terms <- grep("^prior_IronUseYes", var_names, value = TRUE)
+  iron_use_terms <- iron_use_terms[!grepl(":", iron_use_terms)]  # Exclude interaction terms
+  
+  # Opinion terms (centered linear and quadratic)
+  opinion_terms <- c("opinion_centered", "opinion_centered_squared")
+  opinion_terms <- opinion_terms[opinion_terms %in% var_names]
+  
+  # Combine all relevant terms
+  all_terms <- c(knowledge_terms, confidence_terms, country_terms, sex_terms, iron_use_terms, opinion_terms)
+  all_terms <- all_terms[!grepl(":", all_terms)]  # Ensure no interaction terms
+  
+  # Create a dataframe with all relevant OR data
+  if (length(all_terms) > 0) {
+    result <- data.frame(
+      term = all_terms,
+      OR = OR[all_terms],
+      CI_lower = CI[all_terms, 1],
+      CI_upper = CI[all_terms, 2],
+      stringsAsFactors = FALSE
+    )
+    
+    # Extract categories for clearer labels
+    result$category <- NA
+    
+    # Create proper display names based on the term type
+    result$display_name <- result$term
+    
+    # For knowledge terms
+    knowledge_idx <- grepl(paste0("^", domain_prefix, "_knowledge_percent_cat"), result$term)
+    if (any(knowledge_idx)) {
+      result$category[knowledge_idx] <- "Knowledge"
+      result$display_name[knowledge_idx] <- paste0(str_extract(result$term[knowledge_idx], "(Low|High)"), " Knowledge")
+    }
+    
+    # For confidence terms
+    confidence_idx <- grepl(paste0("^", domain_prefix, "_confidence_percent_cat"), result$term)
+    if (any(confidence_idx)) {
+      result$category[confidence_idx] <- "Confidence"
+      result$display_name[confidence_idx] <- paste0(str_extract(result$term[confidence_idx], "(Low|High)"), " Confidence")
+    }
+    
+    # For country terms
+    country_idx <- grepl("^Country", result$term)
+    if (any(country_idx)) {
+      result$category[country_idx] <- "Country"
+      # Extract country code and convert to full name
+      country_codes <- str_extract(result$term[country_idx], "(FIN|GER|JPN|SWE|USA)")
+      country_names <- sapply(country_codes, function(code) {
+        switch(code,
+               "FIN" = "Finland",
+               "GER" = "Germany",
+               "JPN" = "Japan",
+               "SWE" = "Sweden",
+               "USA" = "United States",
+               code)  # Default to code if not found
+      })
+      result$display_name[country_idx] <- country_names
+    }
+    
+    # For sex terms
+    sex_idx <- grepl("^Sex", result$term)
+    if (any(sex_idx)) {
+      result$category[sex_idx] <- "Sex"
+      result$display_name[sex_idx] <- "Male"
+    }
+    
+    # For prior iron use
+    iron_use_idx <- grepl("^prior_IronUseYes", result$term)
+    if (any(iron_use_idx)) {
+      result$category[iron_use_idx] <- "Iron"
+      result$display_name[iron_use_idx] <- "Prior iron use"
+    }
+    
+    # For opinion terms (centered)
+    opinion_idx <- result$term %in% c("opinion_centered", "opinion_centered_squared")
+    if (any(opinion_idx)) {
+      result$category[opinion_idx] <- "Trust"
+      
+      # Create descriptive labels for the centered opinion terms
+      opinion_labels <- character(length(result$term[opinion_idx]))
+      opinion_orders <- numeric(length(result$term[opinion_idx]))
+      
+      for (i in seq_along(result$term[opinion_idx])) {
+        term <- result$term[opinion_idx][i]
+        if (term == "opinion_centered") {
+          opinion_labels[i] <- "Trust in blood service (linear)"
+          opinion_orders[i] <- 1
+        } else if (term == "opinion_centered_squared") {
+          opinion_labels[i] <- "Trust in blood service (quadratic)"
+          opinion_orders[i] <- 2
+        } else {
+          opinion_labels[i] <- term
+          opinion_orders[i] <- 3
+        }
+      }
+      
+      result$display_name[opinion_idx] <- opinion_labels
+      result$trust_order[opinion_idx] <- opinion_orders
+    }
+    
+    return(result)
+  } else {
+    return(NULL)
+  }
+}
+
+# NEW FUNCTION: Create a standardized country position mapping
+create_country_position_mapping <- function() {
+  # Define a standard order for all countries
+  all_countries <- c("Finland", "Germany", "Japan", "Sweden", "United States")
+  
+  # Create a mapping from country name to standard position
+  country_positions <- data.frame(
+    country_name = all_countries,
+    std_position = seq_along(all_countries),
+    stringsAsFactors = FALSE
+  )
+  
+  return(country_positions)
+}
+
+create_enhanced_forest_plot <- function(model, domain_name, condition_number, domain_prefix) {
+  # x-axis limits
+  global_x_min <- 0.25
+  global_x_max <- 10
+
+  # Extract the data for this model
+  model_data <- extract_model_effects(model, domain_prefix)
+
+  if (is.null(model_data) || nrow(model_data) == 0) {
+    warning(paste("No data found for domain", domain_name, "condition", condition_number))
+    return(NULL)
+  }
+
+  # Determine significant effects (CI does not cross 1)
+  model_data$significant <- !(model_data$CI_lower < 1 & model_data$CI_upper > 1)
+
+  # Create a category order for consistent grouping
+  category_order <- c("Knowledge", "Confidence", "Country", "Sex", "Iron", "Trust")
+  model_data$category <- factor(model_data$category, levels = category_order)
+  
+  # Get standardized country positions
+  std_country_positions <- create_country_position_mapping()
+  
+  # Sort by category, then for countries use the standard positions, otherwise use display name or trust_order
+  model_data <- model_data %>%
+    mutate(
+      # Add standard position for countries, or NA for non-countries
+      std_country_pos = ifelse(
+        category == "Country",
+        match(display_name, std_country_positions$country_name),
+        NA
+      )
+    ) %>%
+    arrange(
+      category, 
+      # For countries, use the standard position
+      ifelse(category == "Country", std_country_pos, 
+        # For trust, use trust_order if available
+        ifelse(!is.na(trust_order), trust_order, 
+          # For everything else, use a large number (so they come last within category)
+          999
+        )
+      ), 
+      # Use display_name as final sort key
+      display_name
+    )
+  
+  # Assign y positions with space between categories
+  current_pos <- 1
+  y_positions <- numeric(nrow(model_data))
+  
+  for (cat in category_order) {
+    # Get indices for this category
+    cat_indices <- which(model_data$category == cat)
+    
+    if (length(cat_indices) > 0) {
+      # For countries, we need to ensure all possible countries have a position
+      if (cat == "Country") {
+        # Get countries present in this model
+        present_countries <- model_data$display_name[cat_indices]
+        
+        # For each possible country in our standard list
+        for (std_country in std_country_positions$country_name) {
+          # If this country is present in the data
+          country_idx <- which(model_data$display_name == std_country & model_data$category == "Country")
+          
+          if (length(country_idx) > 0) {
+            # Assign position to this country
+            y_positions[country_idx] <- current_pos
+          }
+          
+          # Always increment position, even if country not present
+          # This ensures consistent spacing across all plots
+          current_pos <- current_pos + 2
+        }
+      } else {
+        # For non-country categories, assign positions sequentially
+        y_positions[cat_indices] <- current_pos + (0:(length(cat_indices)-1)) * 2
+        current_pos <- current_pos + length(cat_indices) * 2
+      }
+      
+      # Add extra space between categories
+      current_pos <- current_pos + 2
+    }
+  }
+  
+  # Assign calculated y-positions
+  model_data$y_pos <- y_positions
+  
+  # Reverse y-positions so highest values are at the top
+  max_y <- max(model_data$y_pos)
+  model_data$y_pos <- max_y - model_data$y_pos + 1
+  
+  # Check for truncated CIs
+  model_data$lower_truncated <- model_data$CI_lower < global_x_min
+  model_data$upper_truncated <- model_data$CI_upper > global_x_max
+
+  # Assign colors based on category
+  model_data$color_code <- case_when(
+    model_data$category == "Knowledge" ~ my_colors[4],   # Orange
+    model_data$category == "Confidence" ~ my_colors[7],  # Light blue
+    model_data$category == "Country" ~ my_colors[6],     # Green
+    model_data$category == "Demographics" ~ my_colors[2], # Pink
+    model_data$category == "Trust" ~ my_colors[5],       # Dark blue
+    TRUE ~ "#999999"                                  # Gray for any others
+  )
+
+
+  # Titles based on condition number
+  condition_titles <- list(
+    "3" = "I would consider using iron supplements if this allows me to keep donating",
+    "4" = "I would consider using iron supplements if advised by a donor physician",
+    "6" = "I would not be willing to use iron supplements if provided by the blood service"
+  )
+
+  condition_title <- condition_titles[[as.character(condition_number)]]
+
+  # Ensure all CIs are within the scale
+  model_data$plot_CI_lower <- pmax(global_x_min, model_data$CI_lower)
+  model_data$plot_CI_upper <- pmin(global_x_max, model_data$CI_upper)
+
+  # Add category labels for the y-axis
+  model_data$y_label <- paste0(model_data$display_name)
+  
+  # Create placeholder rows for missing countries
+  # This ensures labels appear at the right positions even when data is missing
+  placeholder_data <- data.frame()
+  
+  # If this is a country-related plot
+  if (any(model_data$category == "Country")) {
+    # Find which countries are missing
+    present_countries <- model_data$display_name[model_data$category == "Country"]
+    missing_countries <- setdiff(std_country_positions$country_name, present_countries)
+    
+    if (length(missing_countries) > 0) {
+      # For each missing country
+      for (country in missing_countries) {
+        # Find the expected y-position
+        country_pos <- std_country_positions$std_position[std_country_positions$country_name == country]
+        
+        # Calculate y_pos based on the same logic as real countries
+        # This is complex and depends on the exact positioning algorithm
+        
+        # Create placeholder row
+        placeholder_row <- model_data[1, ] # Copy structure from first row
+        placeholder_row$display_name <- country
+        placeholder_row$category <- "Country"
+        placeholder_row$OR <- NA # No data
+        placeholder_row$CI_lower <- NA
+        placeholder_row$CI_upper <- NA
+        placeholder_row$significant <- FALSE
+        placeholder_row$y_label <- country
+        
+        # Calculate proper y-position by finding where this country should be
+        # This uses the same logic as in the main positioning code
+        max_y <- max(model_data$y_pos)
+        all_country_positions <- sort(max_y - (current_pos - (1:nrow(std_country_positions)) * 2) + 1)
+        placeholder_row$y_pos <- all_country_positions[country_pos]
+        
+        # Add to placeholder data
+        placeholder_data <- rbind(placeholder_data, placeholder_row)
+      }
+    }
+  }
+  
+  # Combine real data with placeholders
+  if (nrow(placeholder_data) > 0) {
+    plot_data <- rbind(model_data, placeholder_data)
+  } else {
+    plot_data <- model_data
+  }
+  
+  # Filter out placeholder rows for actual plotting (but keep them for label positioning)
+  data_for_plot <- plot_data[!is.na(plot_data$OR), ]
+  
+  # Create the forest plot
+  forest_plot <- ggplot(data_for_plot, aes(x = OR, y = y_pos)) +
+    # Reference line at OR = 1
+    geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
+
+    # Error bars
+    geom_errorbarh(aes(y = y_pos, xmin = plot_CI_lower, xmax = plot_CI_upper, color = category), height = 0.2, linewidth = 0.75) +
+
+    # Points
+    geom_point(aes(color = category, shape = significant), size = 1.5) +
+
+    # Scale and appearance with custom limits
+    scale_shape_manual(values = c("FALSE" = 1, "TRUE" = 19), guide = "none") +
+    scale_x_continuous(trans = "log10",
+                     limits = c(global_x_min, global_x_max),
+                     breaks = c(0.25, 0.5, 1, 2, 5, 10)) +
+    scale_color_manual(values = c(
+      "Knowledge" = my_colors[4],  # Oranje
+      "Confidence" = my_colors[7], # Lichtblauw
+      "Country" = my_colors[6],   # Groen
+      "Sex" = my_colors[2],        # Donkerblauw-paars
+      "Iron" =my_colors[1],    # Oranje-rood
+      "Trust" = my_colors[5]      # Donkerblauw
+    )) +
+
+    # Y-axis with category groupings and labels
+    scale_y_continuous(
+      breaks = plot_data$y_pos,
+      labels = plot_data$y_label,
+      sec.axis = dup_axis(name = NULL, labels = NULL)
+    ) +
+
+    # Labels
+    labs(
+      title = paste("Odds Ratios for", domain_name, "Domain - Statement", condition_number),
+      subtitle = condition_title,
+      x = "Odds Ratio (95% CI, log scale)",
+      y = NULL
+    ) +
+    theme_minimal() +
+    theme(
+      panel.grid.minor = element_blank(),
+      panel.grid.major.y = element_blank(),
+      legend.position = "none",  
+      plot.margin = margin(t = 20, r = 20, b = 20, l = 20),
+      # Styling for all labels, including missing countries
+      axis.text.y = element_text(
+        size = 10,
+        hjust = 1,
+        color = ifelse(plot_data$y_label %in% missing_countries, "grey70", "black"),
+        face = ifelse(plot_data$y_label %in% missing_countries, "italic", "plain")
+      )
+    )
+
+  # Add arrows for truncated CIs
+  if (any(data_for_plot$lower_truncated)) {
+    arrow_data_left <- data_for_plot[data_for_plot$lower_truncated, ]
+    forest_plot <- forest_plot +
+      geom_segment(
+        data = arrow_data_left,
+        aes(x = global_x_min + 0.01, xend = global_x_min, y = y_pos, yend = y_pos),
+        arrow = arrow(length = unit(0.15, "cm"), type = "closed"),
+        size = 0.18,
+        color = arrow_data_left$color_code
+      )
+  }
+
+  if (any(data_for_plot$upper_truncated)) {
+    arrow_data_right <- data_for_plot[data_for_plot$upper_truncated, ]
+    forest_plot <- forest_plot +
+      geom_segment(
+        data = arrow_data_right,
+        aes(x = global_x_max - 0.1, xend = global_x_max, y = y_pos, yend = y_pos),
+        arrow = arrow(length = unit(0.15, "cm"), type = "closed"),
+        size = 0.18,
+        color = arrow_data_right$color_code
+      )
+  }
+
+  return(forest_plot)
+}
+
+# Create forest plots for Statement 3 across all domains using centered models
+forest_general_3 <- create_enhanced_forest_plot(model_general_3_centered, "General", 3, "general")
+forest_hemoglobin_3 <- create_enhanced_forest_plot(model_hemoglobin_3_centered, "Hemoglobin", 3, "hemoglobin")
+forest_ferritin_3 <- create_enhanced_forest_plot(model_ferritin_3_centered, "Ferritin", 3, "ferritin")
+forest_iron_3 <- create_enhanced_forest_plot(model_iron_3_centered, "Iron Supplements", 3, "ironsupplements")
+
+# Create forest plots for Statement 4 across all domains using centered models
+forest_general_4 <- create_enhanced_forest_plot(model_general_4_centered, "General", 4, "general")
+forest_hemoglobin_4 <- create_enhanced_forest_plot(model_hemoglobin_4_centered, "Hemoglobin", 4, "hemoglobin")
+forest_ferritin_4 <- create_enhanced_forest_plot(model_ferritin_4_centered, "Ferritin", 4, "ferritin")
+forest_iron_4 <- create_enhanced_forest_plot(model_iron_4_centered, "Iron Supplements", 4, "ironsupplements")
+
+# Create forest plots for Statement 6 across all domains using centered models
+forest_general_6 <- create_enhanced_forest_plot(model_general_6_centered, "General", 6, "general")
+forest_hemoglobin_6 <- create_enhanced_forest_plot(model_hemoglobin_6_centered, "Hemoglobin", 6, "hemoglobin")
+forest_ferritin_6 <- create_enhanced_forest_plot(model_ferritin_6_centered, "Ferritin", 6, "ferritin")
+forest_iron_6 <- create_enhanced_forest_plot(model_iron_6_centered, "Iron Supplements", 6, "ironsupplements")
+
+# Print all plots
+# Statement 3
+if (!is.null(forest_general_3)) print(forest_general_3)
+if (!is.null(forest_hemoglobin_3)) print(forest_hemoglobin_3)
+if (!is.null(forest_ferritin_3)) print(forest_ferritin_3)
+if (!is.null(forest_iron_3)) print(forest_iron_3)
+
+# Statement 4
+if (!is.null(forest_general_4)) print(forest_general_4)
+if (!is.null(forest_hemoglobin_4)) print(forest_hemoglobin_4)
+if (!is.null(forest_ferritin_4)) print(forest_ferritin_4)
+if (!is.null(forest_iron_4)) print(forest_iron_4)
+
+# Statement 6
+if (!is.null(forest_general_6)) print(forest_general_6)
+if (!is.null(forest_hemoglobin_6)) print(forest_hemoglobin_6)
+if (!is.null(forest_ferritin_6)) print(forest_ferritin_6)
+if (!is.null(forest_iron_6)) print(forest_iron_6)
+
+```
+
+## lay out in grid
+
+#total forest plot grid
+
+```{r}
+
+# Load patchwork library if not already loaded
+library(patchwork)
+
+# Function to format forest plots for the grid
+format_for_grid <- function(plot, show_y_axis = TRUE, show_x_axis = FALSE) {
+  # Remove individual plot titles and adjust theme for grid layout
+  plot_modified <- plot +
+    theme(
+      plot.title = element_blank(),
+      plot.subtitle = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.x = if(show_x_axis) element_text(size = 6) else element_blank(),
+      axis.title.y = element_blank(),
+      axis.text.y = if(show_y_axis) element_text(size = 7) else element_blank(),
+      plot.margin = margin(1, 1, 1, 1),
+      panel.spacing = unit(0, "mm")
+    )
+  
+  return(plot_modified)
+}
+
+# Format all plots for grid layout using the centered model plots
+# Statement 3 (row 1) - log scale ON
+general_3_grid <- format_for_grid(forest_general_3, show_y_axis = TRUE, show_x_axis = TRUE)
+hemoglobin_3_grid <- format_for_grid(forest_hemoglobin_3, show_y_axis = FALSE, show_x_axis = TRUE)
+ferritin_3_grid <- format_for_grid(forest_ferritin_3, show_y_axis = FALSE, show_x_axis = TRUE)
+iron_3_grid <- format_for_grid(forest_iron_3, show_y_axis = FALSE, show_x_axis = TRUE)
+
+# Statement 4 (row 2) - log scale ON
+general_4_grid <- format_for_grid(forest_general_4, show_y_axis = TRUE, show_x_axis = TRUE)
+hemoglobin_4_grid <- format_for_grid(forest_hemoglobin_4, show_y_axis = FALSE, show_x_axis = TRUE)
+ferritin_4_grid <- format_for_grid(forest_ferritin_4, show_y_axis = FALSE, show_x_axis = TRUE)
+iron_4_grid <- format_for_grid(forest_iron_4, show_y_axis = FALSE, show_x_axis = TRUE)
+
+# Statement 6 (row 3)
+general_6_grid <- format_for_grid(forest_general_6, show_y_axis = TRUE, show_x_axis = TRUE)
+hemoglobin_6_grid <- format_for_grid(forest_hemoglobin_6, show_y_axis = FALSE, show_x_axis = TRUE)
+ferritin_6_grid <- format_for_grid(forest_ferritin_6, show_y_axis = FALSE, show_x_axis = TRUE)
+iron_6_grid <- format_for_grid(forest_iron_6, show_y_axis = FALSE, show_x_axis = TRUE)
+
+# Create column headers for domains
+domain_header_general <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Blood Policy", hjust = 0.5, size = 4) +
+  theme_void()
+
+domain_header_hemoglobin <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Hemoglobin", hjust = 0.5, size = 4) +
+  theme_void()
+
+domain_header_ferritin <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Ferritin", hjust = 0.5, size = 4) +
+  theme_void()
+
+domain_header_iron <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Iron Supplements", hjust = 0.5, size = 4) +
+  theme_void()
+
+# Statement titles with better vertical placement
+statement3_title <- ggplot() +
+  annotate("text", x = -0.5, y = 0.5,
+           label = "I would consider using iron supplements if this allows me to keep donating",
+           hjust = 0, size = 3.0, fontface = "italic") +
+  theme_void() +
+  xlim(-0.5, 1) +
+  ylim(0, 1) +
+  theme(plot.margin = margin(0, 0, 5, 5, "pt"))
+
+statement4_title <- ggplot() +
+  annotate("text", x = -0.5, y = 0.5,
+           label = "I would consider using iron supplements if advised by a donor physician",
+           hjust = 0, size = 3.0, fontface = "italic") +
+  theme_void() +
+  xlim(-0.5, 1) +
+  ylim(0, 1) +
+  theme(plot.margin = margin(0, 0, 5, 5, "pt"))
+
+statement6_title <- ggplot() +
+  annotate("text", x = -0.5, y = 0.5,
+           label = "I would not be willing to use iron supplements if provided by the blood service",
+           hjust = 0, size = 3.0, fontface = "italic") +
+  theme_void() +
+  xlim(-0.5, 1) +
+  ylim(0, 1) +
+  theme(plot.margin = margin(0, 0, 5, 5, "pt"))
+
+# Assemble the grid with patchwork
+# Domain headers
+header_row <- domain_header_general | domain_header_hemoglobin | domain_header_ferritin | domain_header_iron
+
+# Statement rows with titles
+row1_title <- statement3_title + plot_layout(width = 4)
+row1 <- general_3_grid | hemoglobin_3_grid | ferritin_3_grid | iron_3_grid
+
+row2_title <- statement4_title + plot_layout(width = 4)
+row2 <- general_4_grid | hemoglobin_4_grid | ferritin_4_grid | iron_4_grid
+
+row3_title <- statement6_title + plot_layout(width = 4)
+row3 <- general_6_grid | hemoglobin_6_grid | ferritin_6_grid | iron_6_grid
+
+# Voeg een nieuwe header toe bovenaan voor "Knowledge topics"
+knowledge_topics_header <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Knowledge topics", hjust = 0.5, size = 4.5, fontface = "bold") +
+  theme_void()
+
+# Pas de finale grid aan om deze nieuwe header toe te voegen
+final_grid <- (knowledge_topics_header / header_row / row1_title / row1 / row2_title / row2 / row3_title / row3 / x_axis_row / legend_row) +
+  plot_layout(heights = c(0.3, 0.3, 0.4, 2.5, 0.4, 2.5, 0.4, 2.5, 0.4,0.2)) +
+  plot_annotation(
+    #caption = "Odds Ratio (95% CI, log scale)",
+    theme = theme(
+      plot.margin = margin(0, 0, 5, 0),
+      plot.caption = element_text(size = 10, hjust = 0.55, margin = margin(t = 2)),
+      plot.caption.position = "plot"  
+    )
+  )
+
+# Print the final grid
+print(final_grid)
+
+#Save the grid to a file with high resolution
+ggsave(final_grid, file ="L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/forest_plot_grid_centered_models.png", width = 10, height = 8, units = "in", dpi = 300)
+
+```
+
+## grid plot for blood policy topic only
+```{r}
+# Function voor het formatteren van de forest plots
+format_for_grid <- function(plot, show_y_axis = TRUE, show_x_axis = TRUE) {
+  # Behoud titels en pas theme aan voor grid layout
+  plot_modified <- plot +
+    theme(
+      plot.title = element_blank(),
+      plot.subtitle = element_blank(),
+      axis.title.x = element_blank(),
+      axis.text.x = if(show_x_axis) element_text(size = 9) else element_blank(),
+      axis.title.y = element_blank(),
+      axis.text.y = if(show_y_axis) element_text(size = 11) else element_blank(),
+      plot.margin = margin(5, 20, 5, 20),
+      panel.spacing = unit(0, "mm")
+    )
+
+  return(plot_modified)
+}
+
+# Format de Blood Policy plots voor alle drie statements met y-as voor elke plot
+general_3_grid <- format_for_grid(forest_general_3, show_y_axis = TRUE, show_x_axis = TRUE)
+general_4_grid <- format_for_grid(forest_general_4, show_y_axis = FALSE, show_x_axis = TRUE)
+general_6_grid <- format_for_grid(forest_general_6, show_y_axis = FALSE, show_x_axis = TRUE)
+
+# Statement titels met dezelfde stijl
+statement3_title <- ggplot() +
+  annotate("text", x = 0, y = 0.5,
+           label = "Would use supplements\nto continue donating",
+           hjust = 0.5, size = 2.5, fontface = "italic") +
+  theme_void() +
+  theme(plot.margin = margin(0, 0, 5, 0, "pt"))
+
+statement4_title <- ggplot() +
+  annotate("text", x = 0, y = 0.5,
+           label = "Would use supplements\nif advised by physician",
+           hjust = 0.5, size = 2.5, fontface = "italic") +
+  theme_void() +
+  theme(plot.margin = margin(0, 0, 5, 0, "pt"))
+
+statement6_title <- ggplot() +
+  annotate("text", x = 0, y = 0.5,
+           label = "Would not use supplements\nwhen provided ",
+           hjust = 0.5, size = 2.5, fontface = "italic") +
+  theme_void() +
+  theme(plot.margin = margin(0, 0, 5, 0, "pt"))
+
+# legenda maken
+
+create_manual_legend <- function() {
+  # Dummy data just to trigger the legend
+  legend_data <- data.frame(
+    Category = factor(c("Yes", "No"), levels = c("Yes", "No"))
+  )
+
+  shape_map <- c("Yes" = 1, "No" = 16)  # Open and filled circles
+
+  ggplot() +
+    geom_point(data = legend_data, 
+               aes(x = 1, y = 1, shape = Category), 
+               size = 0, alpha = 0) +  # Invisible dummy points
+    scale_shape_manual(values = shape_map) +
+    guides(shape = guide_legend(
+      title = "Statistical significance\n(p < 0.05)",
+      override.aes = list(size = 2, color = "black", alpha = 1),
+      direction = "vertical",
+      title.position = "top",
+      label.position = "right"
+    )) +
+    theme_void() +
+    theme(
+      legend.position = "top",
+      legend.direction = "vertical",
+      legend.title = element_text(size = 8),
+      legend.text = element_text(size = 8),
+      legend.margin = margin(5, 5, 5, 5),
+      plot.margin = margin(0, 0, 0, 0)
+    )
+}
+
+
+# Create legend object
+manual_legend <- create_manual_legend()
+legend_row <- manual_legend + plot_layout(width = 3)
+
+#header
+blood_policy_header <- ggplot() +
+  annotate("text", x = 0, y = 0, label = "Blood Policy Topic", hjust = 0.5, size = 4.5, fontface = "bold") +
+  theme_void()
+
+blood_policy_grid <- (
+  blood_policy_header /  # full row
+  (statement3_title | statement4_title | statement6_title) /  # 3-column row
+  (general_3_grid | general_4_grid | general_6_grid) /  # 3-column row
+  x_axis_row /  # full-width row
+  legend_row    # full-width row
+) +
+  plot_layout(
+    ncol = 1,  # Stack vertically
+    heights = c(0.6, 1, 5, 0.4, 0.2),
+    guides = "collect"
+  ) +
+  plot_annotation(
+    theme = theme(
+      plot.margin = margin(5, 5, 5, 5),
+      plot.caption = element_text(size = 10, hjust = 0.6, margin = margin(t = 10)),
+      plot.caption.position = "panel"
+    )
+  )
+# Print de grid
+print(blood_policy_grid)
+
+# Sla de grid op met goede verhouding
+ggsave(file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure4.png", blood_policy_grid,
+       width = 12, height = 4, units = "in", dpi = 300, bg = "white")
+```

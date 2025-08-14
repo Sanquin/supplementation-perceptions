@@ -1,0 +1,159 @@
+---
+title: "Knowledge, Confidence, and Willingness to Accept Iron Supplementation Among
+  \  Blood Donors Across Multiple Countries - 2"
+author: "A. Meulenbeld"
+date: "2025-07-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(dplyr)
+
+opts_chunk$set(#results = 'asis',      # Can also be set at the chunk-level. IT IS NEEDED IN THE dfsummary chunck
+               comment = NA,
+               prompt  = FALSE,
+               cache   = FALSE,
+               echo = TRUE,
+               message = FALSE,
+               warning = FALSE,
+               width.cutoff=60
+)
+library(summarytools)
+st_options(plain.ascii = FALSE,        # Always use this option in Rmd documents
+           style        = "rmarkdown", # Always use this option in Rmd documents
+           footnote     = NA,          # Makes html-rendered results more concise
+           subtitle.emphasis = FALSE)  # Improves layout with some rmardown themes
+
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(summarytools)
+library(haven)
+library(patchwork)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(grid)
+library(cowplot)
+```
+
+# Open data
+```{r, data}
+donor_data <- readRDS("L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/2. Datasets/thesis_fleur/processed_data.rds")
+```
+
+# Function for table
+```{r}
+# Functie om tabel met absolute en procentuele verdeling te maken
+create_summary_table <- function(data, cols, title) {
+  # Maak een lege tabel om resultaten op te slaan
+  result <- data.frame(
+    Category = c("Low", "Medium", "High"),
+    stringsAsFactors = FALSE
+  )
+  
+  # Voeg kolommen toe voor elk domein
+  for (col in cols) {
+    # Absolute aantallen
+    abs_counts <- table(data[[col]])
+    
+    # Percentages
+    pct_counts <- round(prop.table(abs_counts) * 100, 1)
+    
+    # Combineer als "n (%)""
+    combined <- paste0(abs_counts, " (", pct_counts, "%)")
+    
+    # Toevoegen aan resultaattabel
+    col_name <- sub("_percent_cat$", "", col)
+    result[[col_name]] <- combined
+  }
+  
+  # Print resultaten
+  cat("\n", title, "\n")
+  print(result)
+  
+  return(result)
+}
+```
+
+# Make table
+
+```{r}
+
+# Maak tabellen van de resultaten
+knowledge_domains <- c("general_knowledge_percent_cat", "hemoglobin_knowledge_percent_cat", 
+                     "ferritin_knowledge_percent_cat", "ironsupplements_knowledge_percent_cat",
+                     "total_knowledge_percent_cat")
+
+confidence_domains <- c("general_confidence_percent_cat", "hemoglobin_confidence_percent_cat", 
+                      "ferritin_confidence_percent_cat", "ironsupplements_confidence_percent_cat",
+                      "total_confidence_percent_cat")
+
+knowledge_table <- create_summary_table(
+  donor_data, 
+  knowledge_domains,
+  "Verdeling van kenniscategorieën (absoluut aantal en percentage):"
+)
+
+confidence_table <- create_summary_table(
+  donor_data, 
+  confidence_domains,
+  "Verdeling van confidence categorieën (absoluut aantal en percentage):"
+)
+
+# Maak een tabel per land
+create_country_table <- function(data, col, title) {
+  # Maak een lijst om resultaten op te slaan
+  country_tables <- list()
+  
+  # Voor elk land
+  for (country_name in unique(data$Country)) {
+    # Filter data voor dit land
+    country_data <- data[data$Country == country_name, ]
+    
+    # Bereken absolute aantallen
+    abs_counts <- table(country_data[[col]])
+    
+    # Bereken percentages
+    pct_counts <- round(prop.table(abs_counts) * 100, 1)
+    
+    # Combineer als "n (%)""
+    combined <- paste0(abs_counts, " (", pct_counts, "%)")
+    
+    # Voeg toe aan lijst
+    country_tables[[country_name]] <- combined
+  }
+  
+  # Maak een data frame van de resultaten
+  result <- data.frame(
+    Category = c("Low", "Medium", "High"),
+    stringsAsFactors = FALSE
+  )
+  
+  # Voeg kolommen toe voor elk land
+  for (country_name in names(country_tables)) {
+    result[[country_name]] <- country_tables[[country_name]]
+  }
+  
+  # Print resultaten
+  cat("\n", title, "\n")
+  print(result)
+  
+  return(result)
+}
+
+# Maak tabellen per land
+knowledge_by_country <- create_country_table(
+  donor_data, 
+  "total_knowledge_percent_cat",
+  "Verdeling van totale kenniscategorieën per land (absoluut aantal en percentage):"
+)
+
+confidence_by_country <- create_country_table(
+  donor_data, 
+  "total_confidence_percent_cat",
+  "Verdeling van totale confidence categorieën per land (absoluut aantal en percentage):"
+)
+
+```

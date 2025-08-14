@@ -1,0 +1,381 @@
+---
+title: "Knowledge, Confidence, and Willingness to Accept Iron Supplementation Among
+  Blood Donors Across Multiple Countries - 1"
+author: "A. Meulenbeld"
+date: "2025-07-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(dplyr)
+
+opts_chunk$set(#results = 'asis',      # Can also be set at the chunk-level. IT IS NEEDED IN THE dfsummary chunck
+               comment = NA,
+               prompt  = FALSE,
+               cache   = FALSE,
+               echo = TRUE,
+               message = FALSE,
+               warning = FALSE,
+               width.cutoff=60
+)
+library(summarytools)
+st_options(plain.ascii = FALSE,        # Always use this option in Rmd documents
+           style        = "rmarkdown", # Always use this option in Rmd documents
+           footnote     = NA,          # Makes html-rendered results more concise
+           subtitle.emphasis = FALSE)  # Improves layout with some rmardown themes
+
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(summarytools)
+library(haven)
+library(patchwork)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(grid)
+library(cowplot)
+```
+
+```{r}
+Data <- readRDS ("L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/2. Datasets/thesis_fleur/combined_data.rds")
+
+data <- Data
+
+#AgeGroup
+data <- data %>%
+  mutate(AgeGroup = case_when(
+    Age %in% c("17-20", "18-20", "18-19", "20-29", "21-30") ~ "Under 30",
+    Age %in% c("30-39", "31-40", "40-49", "41-50") ~ "30-49",
+    Age %in% c("50-59", "51-60", "60-69", "61-70") ~ "50-70",
+    Age %in% c("70-79", "71-80", "80+") ~ "70+",
+    TRUE ~ NA_character_  # Default for unexpected values
+  )) %>%
+  select(-c("Age"))
+```
+## create covariates
+
+```{r}
+
+recode_iron_supp_use <- function(original_var) {
+  original_var <- as.character(original_var)
+
+  prior_IronUse <- rep(NA, length(original_var))
+  
+  yes_values <- c(
+    "I have taken iron supplements/multivitamins before, but not anymore",
+    "Yes, I am currently taking iron supplements ordered to me by a docto",
+    "Yes, I am currently taking iron supplements from a drugstore",
+    "Yes, I take multivitamins that contain iron",
+    "Yes, I am currently taking iron supplements ordered to me by a doctor",
+    "Yes, I am currenlty taking iron supplements ordered to me by an doctor",
+    "Yes, I am currently taking iron supplements provided to me by the blood service",
+    "I have taken iron supplements/multivitamins before, but not anymore",
+    "Yes, I take multivitamins that contain iron",
+    "Yes, I take multivitamins that contain iron ",
+    "I have taken iron supplements/multivitamins before, but not anymore "
+  )
+  
+  no_values <- c(
+    "No, I have never taken iron (containing) supplements",
+    "I am taking multivitamins, but I do not know whether or not they contain iron",
+    "I take multivitamin tablets but don't know what they contain",
+    "I am taking supplements, but I don't know if they contain iron",
+    "No, I have never taken iron (containing) supplements",
+    "No, I have never taken iron (containing) supplements "
+  )
+  
+  prior_IronUse[original_var %in% yes_values] <- "Yes"
+  prior_IronUse[original_var %in% no_values] <- "No"
+  prior_IronUse <- factor(prior_IronUse, levels = c("No", "Yes"))
+  
+  return(prior_IronUse)
+}
+
+data$prior_IronUse <- recode_iron_supp_use(data$IronSuppUse)
+
+#add USA data
+
+# Vul prior_IronUse verder aan met de TRUE/FALSE variabelen
+data <- data %>%
+  mutate(prior_IronUse = case_when(
+    # Als prior_IronUse al "Yes" is, behoud het
+    prior_IronUse == "Yes" ~ "Yes",
+    
+    # Als een van IronSuppUse1 t/m IronSuppUse5 TRUE is, wordt het "Yes"
+    IronSuppUse1 == TRUE | IronSuppUse2 == TRUE | 
+    IronSuppUse3 == TRUE | IronSuppUse4 == TRUE | 
+    IronSuppUse5 == TRUE ~ "Yes",
+    
+    # Als IronSuppUse6 of IronSuppUse7 TRUE is, wordt het "No"
+    IronSuppUse6 == TRUE | IronSuppUse7 == TRUE ~ "No",
+    
+    # Anders behoud de originele waarde (bijv. NA)
+    TRUE ~ as.character(prior_IronUse)  
+  ))
+
+# Converteer naar factor
+data$prior_IronUse <- factor(data$prior_IronUse, levels = c("No", "Yes"))
+
+#inclusion/exclusion criteria
+
+#filter NA in Sex and Age
+data <- data %>%
+  filter(!is.na(Sex) & !is.na(AgeGroup))
+
+#Sex Male/Female 
+data <- data[data$Sex %in% c("Female", "Male"), ]
+data$Sex <- factor(data$Sex, levels = c("Female", "Male"))
+
+#remove missing outcome variables 
+data <- data %>%
+  filter(
+    !is.na(IronSuppSanqCondition3) |
+    !is.na(IronSuppSanqCondition4) |
+    !is.na(IronSuppSanqCondition6)
+  )
+
+```
+
+#create knowledge level variable
+
+```{r}
+
+# Define the correct answers for each topic
+correct_answers <- list(
+  general = c(TRUE, FALSE, TRUE, TRUE),
+  hemoglobin = c(FALSE, TRUE, FALSE, TRUE),
+  ferritin = c(TRUE, FALSE, TRUE, FALSE),
+  ironsupplements = c(NA, TRUE, FALSE, TRUE)  # NA for Country-dependent answer
+)
+
+# Create new columns for knowledge scores and confidence scores for each topic
+calculate_scores <- function(data) {
+  
+  # 1. General Knowledge
+  # Check if both knowledge and confidence are answered
+  data$Know1_complete <- !is.na(data$Knowledge1) & !is.na(data$Knowledge1_Certainty)
+  data$Know2_complete <- !is.na(data$Knowledge2) & !is.na(data$Knowledge2_Certainty)
+  data$Know3_complete <- !is.na(data$Knowledge3) & !is.na(data$Knowledge3_Certainty)
+  data$Know4_complete <- !is.na(data$Knowledge4) & !is.na(data$Knowledge4_Certainty)
+  
+  # Count how many questions were answered for each topic 
+  data$general_questions_answered <- rowSums(data[, c("Know1_complete", "Know2_complete", "Know3_complete", "Know4_complete")])
+  
+  data$general_knowledge_score <- rowSums(
+    data.frame(
+      Q1 = ifelse(data$Know1_complete, data$Knowledge1 == correct_answers$general[1], 0),
+      Q2 = ifelse(data$Know2_complete, data$Knowledge2 == correct_answers$general[2], 0),
+      Q3 = ifelse(data$Know3_complete, data$Knowledge3 == correct_answers$general[3], 0), 
+      Q4 = ifelse(data$Know4_complete, data$Knowledge4 == correct_answers$general[4], 0)
+    )
+  )
+  
+  data$general_confidence_score <- rowSums(
+    data.frame(
+      Q1 = ifelse(data$Know1_complete, data$Knowledge1_Certainty == "100%", 0),
+      Q2 = ifelse(data$Know2_complete, data$Knowledge2_Certainty == "100%", 0),
+      Q3 = ifelse(data$Know3_complete, data$Knowledge3_Certainty == "100%", 0),
+      Q4 = ifelse(data$Know4_complete, data$Knowledge4_Certainty == "100%", 0)
+    )
+  )
+  
+  # 2. Hemoglobin Knowledge
+  data$KnowHb1_complete <- !is.na(data$KnowledgeHb1) & !is.na(data$KnowledgeHb1_Certainty)
+  data$KnowHb2_complete <- !is.na(data$KnowledgeHb2) & !is.na(data$KnowledgeHb2_Certainty)
+  data$KnowHb3_complete <- !is.na(data$KnowledgeHb3) & !is.na(data$KnowledgeHb3_Certainty)
+  data$KnowHb4_complete <- !is.na(data$KnowledgeHb4) & !is.na(data$KnowledgeHb4_Certainty)
+  
+  # Count how many questions were answered for hemoglobin
+  data$hemoglobin_questions_answered <- rowSums(data[, c("KnowHb1_complete", "KnowHb2_complete", "KnowHb3_complete", "KnowHb4_complete")])
+  
+  data$hemoglobin_knowledge_score <- rowSums(
+    data.frame(
+      Q1 = ifelse(data$KnowHb1_complete, data$KnowledgeHb1 == correct_answers$hemoglobin[1], 0),
+      Q2 = ifelse(data$KnowHb2_complete, data$KnowledgeHb2 == correct_answers$hemoglobin[2], 0),
+      Q3 = ifelse(data$KnowHb3_complete, data$KnowledgeHb3 == correct_answers$hemoglobin[3], 0),
+      Q4 = ifelse(data$KnowHb4_complete, data$KnowledgeHb4 == correct_answers$hemoglobin[4], 0)
+    )
+  )
+  
+  data$hemoglobin_confidence_score <- rowSums(
+    data.frame(
+      Q1 = ifelse(data$KnowHb1_complete, data$KnowledgeHb1_Certainty == "100%", 0),
+      Q2 = ifelse(data$KnowHb2_complete, data$KnowledgeHb2_Certainty == "100%", 0),
+      Q3 = ifelse(data$KnowHb3_complete, data$KnowledgeHb3_Certainty == "100%", 0),
+      Q4 = ifelse(data$KnowHb4_complete, data$KnowledgeHb4_Certainty == "100%", 0)
+    )
+  )
+  
+  # 3. Ferritin Knowledge
+  data$KnowFer1_complete <- !is.na(data$KnowledgeFer1) & !is.na(data$KnowledgeFer1_Certainty)
+  data$KnowFer2_complete <- !is.na(data$KnowledgeFer2) & !is.na(data$KnowledgeFer2_Certainty)
+  data$KnowFer3_complete <- !is.na(data$KnowledgeFer3) & !is.na(data$KnowledgeFer3_Certainty)
+  data$KnowFer4_complete <- !is.na(data$KnowledgeFer4) & !is.na(data$KnowledgeFer4_Certainty)
+  
+  # Count how many questions were answered for ferritin
+  data$ferritin_questions_answered <- rowSums(data[, c("KnowFer1_complete", "KnowFer2_complete", "KnowFer3_complete", "KnowFer4_complete")])
+  
+  data$ferritin_knowledge_score <- rowSums(
+    data.frame(
+      Q1 = ifelse(data$KnowFer1_complete, data$KnowledgeFer1 == correct_answers$ferritin[1], 0),
+      Q2 = ifelse(data$KnowFer2_complete, data$KnowledgeFer2 == correct_answers$ferritin[2], 0),
+      Q3 = ifelse(data$KnowFer3_complete, data$KnowledgeFer3 == correct_answers$ferritin[3], 0),
+      Q4 = ifelse(data$KnowFer4_complete, data$KnowledgeFer4 == correct_answers$ferritin[4], 0)
+    )
+  )
+  
+  data$ferritin_confidence_score <- rowSums(
+    data.frame(
+      Q1 = ifelse(data$KnowFer1_complete, data$KnowledgeFer1_Certainty == "100%", 0),
+      Q2 = ifelse(data$KnowFer2_complete, data$KnowledgeFer2_Certainty == "100%", 0),
+      Q3 = ifelse(data$KnowFer3_complete, data$KnowledgeFer3_Certainty == "100%", 0),
+      Q4 = ifelse(data$KnowFer4_complete, data$KnowledgeFer4_Certainty == "100%", 0)
+    )
+  )
+  
+  # 4. Iron Supplements Knowledge
+  # Handle the Country-dependent answer for IronSuppKnowledge1
+  data$correct_ironsuppknowledge1 <- ifelse(
+    data$Country %in% c("SWE", "GER", "FIN"), 
+    TRUE, 
+    FALSE
+  )
+  
+  data$KnowIron1_complete <- !is.na(data$IronSuppKnowledge1) & !is.na(data$IronSuppKnowledge1_Certainty)
+  data$KnowIron2_complete <- !is.na(data$IronSuppKnowledge2) & !is.na(data$IronSuppKnowledge2_Certainty)
+  data$KnowIron3_complete <- !is.na(data$IronSuppKnowledge3) & !is.na(data$IronSuppKnowledge3_Certainty)
+  data$KnowIron4_complete <- !is.na(data$IronSuppKnowledge4) & !is.na(data$IronSuppKnowledge4_Certainty)
+  
+  # Count how many questions were answered for iron supplements
+  data$ironsupplements_questions_answered <- rowSums(data[, c("KnowIron1_complete", "KnowIron2_complete", "KnowIron3_complete", "KnowIron4_complete")])
+  
+  data$ironsupplements_knowledge_score <- rowSums(
+    data.frame(
+      Q1 = ifelse(data$KnowIron1_complete, data$IronSuppKnowledge1 == data$correct_ironsuppknowledge1, 0),
+      Q2 = ifelse(data$KnowIron2_complete, data$IronSuppKnowledge2 == correct_answers$ironsupplements[2], 0),
+      Q3 = ifelse(data$KnowIron3_complete, data$IronSuppKnowledge3 == correct_answers$ironsupplements[3], 0),
+      Q4 = ifelse(data$KnowIron4_complete, data$IronSuppKnowledge4 == correct_answers$ironsupplements[4], 0)
+    )
+  )
+  
+  data$ironsupplements_confidence_score <- rowSums(
+    data.frame(
+      Q1 = ifelse(data$KnowIron1_complete, data$IronSuppKnowledge1_Certainty == "100%", 0),
+      Q2 = ifelse(data$KnowIron2_complete, data$IronSuppKnowledge2_Certainty == "100%", 0),
+      Q3 = ifelse(data$KnowIron3_complete, data$IronSuppKnowledge3_Certainty == "100%", 0),
+      Q4 = ifelse(data$KnowIron4_complete, data$IronSuppKnowledge4_Certainty == "100%", 0)
+    )
+  )
+  
+  # Totaal aantal beantwoorde vragen
+  data$total_questions_answered <- data$general_questions_answered +
+                                  data$hemoglobin_questions_answered +
+                                  data$ferritin_questions_answered +
+                                  data$ironsupplements_questions_answered
+  
+  # Totale knowledge score (som van alle correcte antwoorden)
+  data$total_knowledge_score <- data$general_knowledge_score +
+                               data$hemoglobin_knowledge_score +
+                               data$ferritin_knowledge_score +
+                               data$ironsupplements_knowledge_score
+  
+  # Totale confidence score (som van alle 100% zekere antwoorden)
+  data$total_confidence_score <- data$general_confidence_score +
+                                data$hemoglobin_confidence_score +
+                                data$ferritin_confidence_score +
+                                data$ironsupplements_confidence_score
+  
+  # Remove the temporary column
+  data$correct_ironsuppknowledge1 <- NULL
+  
+  # Clean up temporary columns
+  cols_to_remove <- c(
+    "Know1_complete", "Know2_complete", "Know3_complete", "Know4_complete",
+    "KnowHb1_complete", "KnowHb2_complete", "KnowHb3_complete", "KnowHb4_complete",
+    "KnowFer1_complete", "KnowFer2_complete", "KnowFer3_complete", "KnowFer4_complete",
+    "KnowIron1_complete", "KnowIron2_complete", "KnowIron3_complete", "KnowIron4_complete"
+  )
+  data[cols_to_remove] <- NULL
+  
+  # Return the data with added scores and categories
+  return(data)
+}
+
+# Apply the function to your data
+donor_data <- calculate_scores(data)
+
+# Bereken percentage correct per domein (als er ten minste één vraag is beantwoord)
+donor_data$general_knowledge_percent <- ifelse(donor_data$general_questions_answered > 0,
+                                           (donor_data$general_knowledge_score / donor_data$general_questions_answered) * 100,
+                                           NA)
+donor_data$hemoglobin_knowledge_percent <- ifelse(donor_data$hemoglobin_questions_answered > 0,
+                                              (donor_data$hemoglobin_knowledge_score / donor_data$hemoglobin_questions_answered) * 100,
+                                              NA)
+donor_data$ferritin_knowledge_percent <- ifelse(donor_data$ferritin_questions_answered > 0,
+                                            (donor_data$ferritin_knowledge_score / donor_data$ferritin_questions_answered) * 100,
+                                            NA)
+donor_data$ironsupplements_knowledge_percent <- ifelse(donor_data$ironsupplements_questions_answered > 0,
+                                                   (donor_data$ironsupplements_knowledge_score / donor_data$ironsupplements_questions_answered) * 100,
+                                                   NA)
+
+# Voor confidence scores
+donor_data$general_confidence_percent <- ifelse(donor_data$general_questions_answered > 0,
+                                            (donor_data$general_confidence_score / donor_data$general_questions_answered) * 100,
+                                            NA)
+donor_data$hemoglobin_confidence_percent <- ifelse(donor_data$hemoglobin_questions_answered > 0,
+                                               (donor_data$hemoglobin_confidence_score / donor_data$hemoglobin_questions_answered) * 100,
+                                               NA)
+donor_data$ferritin_confidence_percent <- ifelse(donor_data$ferritin_questions_answered > 0,
+                                             (donor_data$ferritin_confidence_score / donor_data$ferritin_questions_answered) * 100,
+                                             NA)
+donor_data$ironsupplements_confidence_percent <- ifelse(donor_data$ironsupplements_questions_answered > 0,
+                                                    (donor_data$ironsupplements_confidence_score / donor_data$ironsupplements_questions_answered) * 100,
+                                                    NA)
+
+# Totaal percentage
+donor_data$total_knowledge_percent <- ifelse(donor_data$total_questions_answered > 0,
+                                         (donor_data$total_knowledge_score / donor_data$total_questions_answered) * 100,
+                                         NA)
+donor_data$total_confidence_percent <- ifelse(donor_data$total_questions_answered > 0,
+                                          (donor_data$total_confidence_score / donor_data$total_questions_answered) * 100,
+                                          NA)
+
+# Categoriseren op basis van percentages
+# 0-25% = laag, 26-75% = midden, 76-100% = hoog
+donor_data$general_knowledge_percent_cat <- cut(donor_data$general_knowledge_percent, 
+                                           breaks = c(-0.01, 25, 75, 100.01), 
+                                           labels = c("Low", "Medium", "High"))
+donor_data$hemoglobin_knowledge_percent_cat <- cut(donor_data$hemoglobin_knowledge_percent, 
+                                              breaks = c(-0.01, 25, 75, 100.01), 
+                                              labels = c("Low", "Medium", "High"))
+donor_data$ferritin_knowledge_percent_cat <- cut(donor_data$ferritin_knowledge_percent, 
+                                            breaks = c(-0.01, 25, 75, 100.01), 
+                                            labels = c("Low", "Medium", "High"))
+donor_data$ironsupplements_knowledge_percent_cat <- cut(donor_data$ironsupplements_knowledge_percent, 
+                                                    breaks = c(-0.01, 25, 75, 100.01), 
+                                                    labels = c("Low", "Medium", "High"))
+donor_data$total_knowledge_percent_cat <- cut(donor_data$total_knowledge_percent, 
+                                          breaks = c(-0.01, 25, 75, 100.01), 
+                                          labels = c("Low", "Medium", "High"))
+
+# Categoriseren van confidence percentages
+donor_data$general_confidence_percent_cat <- cut(donor_data$general_confidence_percent, 
+                                            breaks = c(-0.01, 25, 75, 100.01), 
+                                            labels = c("Low", "Medium", "High"))
+donor_data$hemoglobin_confidence_percent_cat <- cut(donor_data$hemoglobin_confidence_percent, 
+                                               breaks = c(-0.01, 25, 75, 100.01), 
+                                               labels = c("Low", "Medium", "High"))
+donor_data$ferritin_confidence_percent_cat <- cut(donor_data$ferritin_confidence_percent, 
+                                             breaks = c(-0.01, 25, 75, 100.01), 
+                                             labels = c("Low", "Medium", "High"))
+donor_data$ironsupplements_confidence_percent_cat <- cut(donor_data$ironsupplements_confidence_percent, 
+                                                     breaks = c(-0.01, 25, 75, 100.01), 
+                                                     labels = c("Low", "Medium", "High"))
+donor_data$total_confidence_percent_cat <- cut(donor_data$total_confidence_percent, 
+                                           breaks = c(-0.01, 25, 75, 100.01), 
+                                           labels = c("Low", "Medium", "High"))
+
+saveRDS(donor_data, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/2. Datasets/thesis_fleur/processed_data.rds")
+```

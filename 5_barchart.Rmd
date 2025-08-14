@@ -1,0 +1,724 @@
+---
+title: "Knowledge, Confidence, and Willingness to Accept Iron Supplementation Among
+  Blood Donors Across Multiple Countries - 5"
+author: "A. Meulenbeld"
+date: "2025-07-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(dplyr)
+
+opts_chunk$set(#results = 'asis',      # Can also be set at the chunk-level. IT IS NEEDED IN THE dfsummary chunck
+               comment = NA,
+               prompt  = FALSE,
+               cache   = FALSE,
+               echo = TRUE,
+               message = FALSE,
+               warning = FALSE,
+               width.cutoff=60
+)
+library(summarytools)
+st_options(plain.ascii = FALSE,        # Always use this option in Rmd documents
+           style        = "rmarkdown", # Always use this option in Rmd documents
+           footnote     = NA,          # Makes html-rendered results more concise
+           subtitle.emphasis = FALSE)  # Improves layout with some rmardown themes
+
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(summarytools)
+library(haven)
+library(patchwork)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(grid)
+library(cowplot)
+```
+
+# Open data
+```{r, data}
+donor_data <- readRDS("L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/2. Datasets/thesis_fleur/processed_data.rds")
+```
+
+# Barplots for confidence and knowledge
+## Prepare data
+```{r}
+
+# prepate data and spacing
+prepare_minimal_spacing_data <- function(data) {
+  # distance between groups
+  scale_factor = 1.5
+  
+  # prepare country and knowledge data
+  knowledge_country <- data %>%
+    group_by(Country, total_knowledge_percent_cat) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    group_by(Country) %>%
+    mutate(
+      Percentage = (Count / sum(Count)) * 100,
+      Type = "Knowledge",
+      position = match(Country, c("FIN", "GER", "JPN", "NL", "SWE", "USA")) * scale_factor - 0.2,
+      Group = total_knowledge_percent_cat,
+      TypeGroup = paste("Knowledge", total_knowledge_percent_cat, sep = " - ")
+    ) %>%
+    select(Country, Group = total_knowledge_percent_cat, Percentage, Type, TypeGroup, position)
+  
+  # prepare country and confidence data
+  confidence_country <- data %>%
+    group_by(Country, total_confidence_percent_cat) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    group_by(Country) %>%
+    mutate(
+      Percentage = (Count / sum(Count)) * 100,
+      Type = "Confidence",
+      position = match(Country, c("FIN", "GER", "JPN", "NL", "SWE", "USA")) * scale_factor + 0.2,
+      Group = total_confidence_percent_cat,
+      TypeGroup = paste("Confidence", total_confidence_percent_cat, sep = " - ")
+    ) %>%
+    select(Country, Group = total_confidence_percent_cat, Percentage, Type, TypeGroup, position)
+  
+  # minimize code repetition 
+  create_topic_data <- function(percent_cat_column, topic_name, position_val, type) {
+    topic_filter <- if(topic_name == "Ferritin") filter(data, Country != "GER") else data
+    
+    topic_filter %>%
+      group_by(!!sym(percent_cat_column)) %>%
+      summarise(Count = n(), .groups = "drop") %>%
+      mutate(
+        Percentage = (Count / sum(Count)) * 100,
+        Topic = topic_name,
+        Type = type,
+        Group = .data[[percent_cat_column]],
+        position = position_val + ifelse(type == "Knowledge", -0.2, 0.2),
+        TypeGroup = paste(type, .data[[percent_cat_column]], sep = " - ")
+      ) %>%
+      select(Topic, Group, Percentage, Type, TypeGroup, position)
+  }
+  
+  #knowlege en confidence topics
+  knowledge_topic <- bind_rows(
+    # Ferritin knowledge
+    create_topic_data("ferritin_knowledge_percent_cat", "Ferritin", 1.5, "Knowledge"),
+    # General knowledge
+    create_topic_data("general_knowledge_percent_cat", "General", 3.0, "Knowledge"),
+    # Hemoglobin knowledge
+    create_topic_data("hemoglobin_knowledge_percent_cat", "Hemoglobin", 4.5, "Knowledge"),
+    # Supplements knowledge
+    create_topic_data("ironsupplements_knowledge_percent_cat", "Supplements", 6.0, "Knowledge")
+  )
+  
+  confidence_topic <- bind_rows(
+    # Ferritin confidence
+    create_topic_data("ferritin_confidence_percent_cat", "Ferritin", 1.5, "Confidence"),
+    # General confidence
+    create_topic_data("general_confidence_percent_cat", "General", 3.0, "Confidence"),
+    # Hemoglobin confidence
+    create_topic_data("hemoglobin_confidence_percent_cat", "Hemoglobin", 4.5, "Confidence"),
+    # Supplements confidence
+    create_topic_data("ironsupplements_confidence_percent_cat", "Supplements", 6.0, "Confidence")
+  )
+  
+  # combine data
+  countries_combined <- bind_rows(knowledge_country, confidence_country)
+  topics_combined <- bind_rows(knowledge_topic, confidence_topic)
+  
+  # consistent factor levels
+  countries_combined$Group <- factor(countries_combined$Group, levels = c("Low", "Medium", "High"))
+  topics_combined$Group <- factor(topics_combined$Group, levels = c("Low", "Medium", "High"))
+  
+  #Define country and topic
+  countries_combined$Country <- factor(countries_combined$Country, 
+                                     levels = c("FIN", "GER", "JPN", "NL", "SWE", "USA"))
+  topics_combined$Topic <- factor(topics_combined$Topic, 
+                                levels = c("Ferritin", "General", "Hemoglobin", "Supplements"))
+  
+  
+  # Set consistent TypeGroup order: Low < Medium < High within each Type
+typegroup_levels <- c(
+  "Knowledge - High", "Knowledge - Medium", "Knowledge - Low",
+  "Confidence - High", "Confidence - Medium", "Confidence - Low"
+)
+
+countries_combined$TypeGroup <- factor(countries_combined$TypeGroup, levels = typegroup_levels)
+topics_combined$TypeGroup <- factor(topics_combined$TypeGroup, levels = typegroup_levels)
+  return(list(countries = countries_combined, topics = topics_combined))
+}
+
+# prepare data for minimal space
+minimal_data <- prepare_minimal_spacing_data(donor_data)
+minimal_country_data <- minimal_data$countries
+minimal_topic_data <- minimal_data$topics
+```
+
+## Colours
+```{r}
+#Define colors
+my_colors <- c("#C969A1FF","#CE4441FF", "#EE8577FF", "#EB7926FF", "#FFBB44FF","#859B6CFF", "#62929AFF", "#004F63FF", "#122451FF")
+know_conf_colours <- c("Knowledge - Low" = "#FFA766FF", "Knowledge - Medium" ="#EB7926FF", "Knowledge - High" = "#A34F15FF", "Confidence - Low" = "#B6D4D9FF", "Confidence - Medium" ="#8BB2B9FF", "Confidence - High" = "#62929AFF")
+
+```
+
+## Plot
+```{r}
+x_labels <- c(paste0("FIN\n(n=",length((donor_data$Country[donor_data$Country=="FIN"])),")"),
+              paste0("GER\n(n=",length((donor_data$Country[donor_data$Country=="GER"])),")"),
+              paste0("JPN\n(n=",length((donor_data$Country[donor_data$Country=="JPN"])),")"),
+              paste0("NL\n(n=",length((donor_data$Country[donor_data$Country=="NL"])),")"),
+              paste0("SWE\n(n=",length((donor_data$Country[donor_data$Country=="SWE"])),")"),
+              paste0("USA\n(n=",length((donor_data$Country[donor_data$Country=="USA"])),")"))
+
+#Country plot 
+country_plot <- ggplot(minimal_country_data, aes(x = position, y = Percentage, fill = TypeGroup)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.35) +
+  scale_fill_manual(values = know_conf_colours, name = "Category", na.value = "#000000") +
+  #change x-axis 
+  scale_x_continuous(
+    breaks = c(1.5, 3.0, 4.5, 6.0, 7.5, 9.0),
+    labels = x_labels,
+    limits = c(0.5, 9.5)
+  ) +
+  #Add K and C labels
+  #geom_text(aes(label = substr(Type, 1, 1),
+  #             y = -5),
+  #         size = 3, color = "darkgrey") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = 10),
+    plot.title = element_text(hjust = 0, size = 12),
+    plot.margin = margin(t = 10, r = 10, b = 20, l = 10)
+  ) +
+  labs(y="Percentage (%)", title ="A. Knowledge score per country of all topics combined") +
+  coord_cartesian(ylim = c(0, 100), clip = "off")
+
+#Topic plot
+topic_plot <- ggplot(minimal_topic_data, aes(x = position, y = Percentage, fill = TypeGroup)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.35) +
+  scale_fill_manual(values = know_conf_colours, name = "Category", na.value = "#000000") +
+  #change x-axis 
+  scale_x_continuous(
+    breaks = c(1.5, 3.0, 4.5, 6.0),
+    labels = c("Ferritin", "Blood Policy", "Hemoglobin", "Supplements"),
+    limits = c(0.5, 7.0)
+  ) +
+  #Add K and C labels
+  # geom_text(aes(label = substr(Type, 1, 1),
+  #               y = -5),
+  #           size = 3, color = "darkgrey") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = 10),
+    plot.title = element_text(hjust = 0, size = 12),
+    plot.margin = margin(t = 10, r = 10, b = 10, l = 10)
+  ) +
+  labs(y="Percentage (%)", title = "B. Knowledge score per topic of all countries combined") +
+  coord_cartesian(ylim = c(0, 100), clip = "off")
+
+# Create legends
+create_level_legend <- function(VariableName, Low, Medium, High) {
+  legend_data <- data.frame(
+    x = 1:4,
+    y = rep(0, 4),
+    Category = factor(c("Low", "Medium", "High", "Missing"), levels = c("Low", "Medium", "High", "Missing"))
+  )
+  
+  legend_plot <- ggplot(legend_data, aes(x = x, y = y, fill = Category)) +
+    geom_point(shape = 22, size = 4, alpha = 0) + 
+    scale_fill_manual(values = c("Low" = Low, "Medium" = Medium, "High" = High, "Missing" = "#000000")) +
+    guides(fill = guide_legend(
+      title = VariableName,
+      override.aes = list(shape = 22, size = 4, alpha = 1), 
+      direction = "horizontal",
+      title.position = "left",
+      label.position = "right"
+    )) +
+    theme_void() +
+    theme(
+      legend.position = "bottom",
+      legend.direction = "horizontal",
+      legend.title = element_text(size = 10),
+      legend.text = element_text(size = 9),
+      legend.margin = margin(t = 5, r = 5, b = 5, l = 5),
+      plot.margin = margin(0, 0, 0, 0),
+      legend.key = element_rect(fill = NA, color = NA) # removes border
+    )
+  
+  return(legend_plot)
+}
+
+legend_level_knowledge <- create_level_legend("Knowledge", "#FFA766FF", "#EB7926FF", "#A34F15FF")
+legend_level_confidence <- create_level_legend("Confidence", "#B6D4D9FF", "#8BB2B9FF", "#62929AFF")
+
+# Final plot
+final_plot <- plot_grid(
+  country_plot,
+  topic_plot,
+  legend_level_knowledge,
+  legend_level_confidence,
+  ncol = 1,
+  rel_heights = c(0.35, 0.3, 0.04, 0.04)
+)
+
+print(final_plot)
+ggsave(final_plot, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure2.png",bg="white")
+```
+
+# For supplement: Each topic and country separated
+## prepare data
+```{r}
+
+prepare_minimal_spacing_data <- function(data) {
+  # distance between groups
+  scale_factor = 1.5
+  
+  # prepare country and knowledge data
+  knowledge_country <- data %>%
+    group_by(Country, total_knowledge_percent_cat) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    group_by(Country) %>%
+    mutate(
+      Percentage = (Count / sum(Count)) * 100,
+      Type = "Knowledge",
+      position = match(Country, c("FIN", "GER", "JPN", "NL", "SWE", "USA")) * scale_factor - 0.2,
+      Group = total_knowledge_percent_cat,
+      TypeGroup = paste("Knowledge", total_knowledge_percent_cat, sep = " - ")
+    ) %>%
+    select(Country, Group = total_knowledge_percent_cat, Percentage, Type, TypeGroup, position)
+  
+  # prepare country and confidence data
+  confidence_country <- data %>%
+    group_by(Country, total_confidence_percent_cat) %>%
+    summarise(Count = n(), .groups = "drop") %>%
+    group_by(Country) %>%
+    mutate(
+      Percentage = (Count / sum(Count)) * 100,
+      Type = "Confidence",
+      position = match(Country, c("FIN", "GER", "JPN", "NL", "SWE", "USA")) * scale_factor + 0.2,
+      Group = total_confidence_percent_cat,
+      TypeGroup = paste("Confidence", total_confidence_percent_cat, sep = " - ")
+    ) %>%
+    select(Country, Group = total_confidence_percent_cat, Percentage, Type, TypeGroup, position)
+  
+  # Knowledge per country per topic
+knowledge_country_topic <- data %>%
+  pivot_longer(cols = ends_with("_knowledge_percent_cat"),
+               names_to = "TopicCol", values_to = "Category") %>%
+  mutate(
+    Topic = case_when(
+      TopicCol == "ferritin_knowledge_percent_cat" ~ "Ferritin",
+      TopicCol == "general_knowledge_percent_cat" ~ "General",
+      TopicCol == "hemoglobin_knowledge_percent_cat" ~ "Hemoglobin",
+      TopicCol == "ironsupplements_knowledge_percent_cat" ~ "Supplements",
+      TopicCol == "total_knowledge_percent_cat" ~ "Total"
+    )
+  ) %>%
+  #filter(!is.na(Category)) %>%
+  group_by(Country, Topic, Category) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  group_by(Country, Topic) %>%
+  mutate(
+    Percentage = (Count / sum(Count)) * 100,
+    Type = "Knowledge",
+    Group = Category,
+    TypeGroup = paste(Type, Category, sep = " - "),
+    position = match(Country, c("FIN", "GER", "JPN", "NL", "SWE", "USA")) * scale_factor + 0.2
+  ) %>%
+  ungroup()
+
+# Confidence per country per topic
+confidence_country_topic <- data %>%
+  pivot_longer(cols = ends_with("_confidence_percent_cat"),
+               names_to = "TopicCol", values_to = "Category") %>%
+  mutate(
+    Topic = case_when(
+      TopicCol == "ferritin_confidence_percent_cat" ~ "Ferritin",
+      TopicCol == "general_confidence_percent_cat" ~ "General",
+      TopicCol == "hemoglobin_confidence_percent_cat" ~ "Hemoglobin",
+      TopicCol == "ironsupplements_confidence_percent_cat" ~ "Supplements",
+      TopicCol == "total_confidence_percent_cat" ~ "Total"
+    )
+  ) %>%
+  #filter(!is.na(Category)) %>%
+  group_by(Country, Topic, Category) %>%
+  summarise(Count = n(), .groups = "drop") %>%
+  group_by(Country, Topic) %>%
+  mutate(
+    Percentage = (Count / sum(Count)) * 100,
+    Type = "Confidence",
+    Group = Category,
+    TypeGroup = paste(Type, Category, sep = " - "),
+    position = match(Country, c("FIN", "GER", "JPN", "NL", "SWE", "USA")) * scale_factor - 0.2
+  ) %>%
+  ungroup()
+
+# Combine
+country_topic_combined <- bind_rows(knowledge_country_topic, confidence_country_topic)
+  
+  # minimize code repetition 
+  create_topic_data <- function(percent_cat_column, topic_name, position_val, type) {
+    topic_filter <- if(topic_name == "Ferritin") filter(data, Country != "GER") else data
+    
+    topic_filter %>%
+      group_by(!!sym(percent_cat_column)) %>%
+      summarise(Count = n(), .groups = "drop") %>%
+      mutate(
+        Percentage = (Count / sum(Count)) * 100,
+        Topic = topic_name,
+        Type = type,
+        Group = .data[[percent_cat_column]],
+        position = position_val + ifelse(type == "Knowledge", -0.2, 0.2),
+        TypeGroup = paste(type, .data[[percent_cat_column]], sep = " - ")
+      ) %>%
+      select(Topic, Group, Percentage, Type, TypeGroup, position)
+  }
+  
+  #knowlege en confidence topics
+  knowledge_topic <- bind_rows(
+    # Ferritin knowledge
+    create_topic_data("ferritin_knowledge_percent_cat", "Ferritin", 1.5, "Knowledge"),
+    # General knowledge
+    create_topic_data("general_knowledge_percent_cat", "General", 3.0, "Knowledge"),
+    # Hemoglobin knowledge
+    create_topic_data("hemoglobin_knowledge_percent_cat", "Hemoglobin", 4.5, "Knowledge"),
+    # Supplements knowledge
+    create_topic_data("ironsupplements_knowledge_percent_cat", "Supplements", 6.0, "Knowledge")
+  )
+  
+  confidence_topic <- bind_rows(
+    # Ferritin confidence
+    create_topic_data("ferritin_confidence_percent_cat", "Ferritin", 1.5, "Confidence"),
+    # General confidence
+    create_topic_data("general_confidence_percent_cat", "General", 3.0, "Confidence"),
+    # Hemoglobin confidence
+    create_topic_data("hemoglobin_confidence_percent_cat", "Hemoglobin", 4.5, "Confidence"),
+    # Supplements confidence
+    create_topic_data("ironsupplements_confidence_percent_cat", "Supplements", 6.0, "Confidence")
+  )
+  
+  # combine data
+  countries_combined <- bind_rows(knowledge_country, confidence_country)
+  topics_combined <- bind_rows(knowledge_topic, confidence_topic)
+  
+  # consistent factor levels
+  countries_combined$Group <- factor(countries_combined$Group, levels = c("Low", "Medium", "High"))
+  topics_combined$Group <- factor(topics_combined$Group, levels = c("Low", "Medium", "High"))
+  
+  #Define country and topic
+  countries_combined$Country <- factor(countries_combined$Country, 
+                                     levels = c("FIN", "GER", "JPN", "NL", "SWE", "USA"))
+  topics_combined$Topic <- factor(topics_combined$Topic, 
+                                levels = c("Ferritin", "General", "Hemoglobin", "Supplements"))
+  
+  
+  # Set consistent TypeGroup order: Low < Medium < High within each Type
+typegroup_levels <- c(
+  "Knowledge - High", "Knowledge - Medium", "Knowledge - Low",
+  "Confidence - High", "Confidence - Medium", "Confidence - Low"
+)
+
+countries_combined$TypeGroup <- factor(countries_combined$TypeGroup, levels = typegroup_levels)
+topics_combined$TypeGroup <- factor(topics_combined$TypeGroup, levels = typegroup_levels)
+country_topic_combined$TypeGroup <- factor(country_topic_combined$TypeGroup, levels = typegroup_levels)
+
+  return(list(
+  countries = countries_combined,
+  topics = topics_combined,
+  country_topics = country_topic_combined  # New!
+))
+
+}
+
+minimal_data <- prepare_minimal_spacing_data(donor_data)
+country_topics <- minimal_data$country_topics
+extra_rows <- tibble(
+  Country = c("GER", "GER"),
+  Topic = c("Ferritin", "Ferritin"),
+  Group = NA,
+  Count = c(553, 553),
+  Percentage = c(100, 100),
+  Type = c("Knowledge", "Confidence"),
+  TypeGroup = NA,
+  position = c(3.2, 2.8)
+)
+
+# Combine with original
+country_topics <- bind_rows(country_topics, extra_rows)
+
+```
+
+## make plots
+```{r}
+#General plot 
+general_plot <- ggplot(country_topics[country_topics$Topic=="General",], aes(x = as.numeric(position), y = as.numeric(Percentage), fill = TypeGroup)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.35) +
+  scale_fill_manual(values = know_conf_colours, name = "Category", na.value = "#000000") +
+  #change x-axis 
+  scale_x_continuous(
+    breaks = c(1.5, 3.0, 4.5, 6.0, 7.5, 9.0),
+    labels = x_labels,
+    limits = c(0.5, 9.5)
+  ) +
+  #Add K and C labels
+  #geom_text(aes(label = substr(Type, 1, 1),
+  #             y = -5),
+  #         size = 3, color = "darkgrey") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = 10),
+    plot.title = element_text(hjust = 0, size = 12),
+    plot.margin = margin(t = 10, r = 10, b = 20, l = 10)
+  ) +
+  labs(y="Percentage (%)", title ="Knowledge topic: General blood donation") +
+  coord_cartesian(ylim = c(0, 100), clip = "off")
+
+#Hemoglobin plot 
+hemoglobin_plot <- ggplot(country_topics[country_topics$Topic=="Hemoglobin",], aes(x = as.numeric(position), y = as.numeric(Percentage), fill = TypeGroup)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.35) +
+  scale_fill_manual(values = know_conf_colours, name = "Category", na.value = "#000000") +
+  #change x-axis 
+  scale_x_continuous(
+    breaks = c(1.5, 3.0, 4.5, 6.0, 7.5, 9.0),
+    labels = x_labels,
+    limits = c(0.5, 9.5)
+  ) +
+  #Add K and C labels
+  #geom_text(aes(label = substr(Type, 1, 1),
+  #             y = -5),
+  #         size = 3, color = "darkgrey") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = 10),
+    plot.title = element_text(hjust = 0, size = 12),
+    plot.margin = margin(t = 10, r = 10, b = 20, l = 10)
+  ) +
+  labs(y="Percentage (%)", title ="Knowledge topic: Hemoglobin") +
+  coord_cartesian(ylim = c(0, 100), clip = "off")
+
+#Ferritin plot 
+ferritin_plot <- ggplot(country_topics[country_topics$Topic=="Ferritin",], aes(x = as.numeric(position), y = as.numeric(Percentage), fill = TypeGroup)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.35) +
+  scale_fill_manual(values = know_conf_colours, name = "Category", na.value = "#000000") +
+  #change x-axis 
+  scale_x_continuous(
+    breaks = c(1.5, 3.0, 4.5, 6.0, 7.5, 9.0),
+    labels = x_labels,
+    limits = c(0.5, 9.5)
+  ) +
+  #Add K and C labels
+  #geom_text(aes(label = substr(Type, 1, 1),
+  #             y = -5),
+  #         size = 3, color = "darkgrey") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = 10),
+    plot.title = element_text(hjust = 0, size = 12),
+    plot.margin = margin(t = 10, r = 10, b = 20, l = 10)
+  ) +
+  labs(y="Percentage (%)", title ="Knowledge topic: Ferritin") +
+  coord_cartesian(ylim = c(0, 99.5), clip = "on")
+
+#supplements plot 
+supplements_plot <- ggplot(country_topics[country_topics$Topic=="Supplements",], aes(x = as.numeric(position), y = as.numeric(Percentage), fill = TypeGroup)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.35) +
+  scale_fill_manual(values = know_conf_colours, name = "Category", na.value = "#000000") +
+  #change x-axis 
+  scale_x_continuous(
+    breaks = c(1.5, 3.0, 4.5, 6.0, 7.5, 9.0),
+    labels = x_labels,
+    limits = c(0.5, 9.5)
+  ) +
+  #Add K and C labels
+  #geom_text(aes(label = substr(Type, 1, 1),
+  #             y = -5),
+  #         size = 3, color = "darkgrey") +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    axis.title.x = element_blank(),
+    axis.text.x = element_text(size = 10),
+    plot.title = element_text(hjust = 0, size = 12),
+    plot.margin = margin(t = 10, r = 10, b = 20, l = 10)
+  ) +
+  labs(y="Percentage (%)", title ="Knowledge topic: Supplements") +
+  coord_cartesian(ylim = c(0, 100), clip = "off")
+```
+
+```{r}
+# combined plot
+appendix_plot <- plot_grid(
+  general_plot,
+  hemoglobin_plot,
+  ferritin_plot,
+  supplements_plot,
+  legend_level_knowledge,
+  legend_level_confidence,
+  ncol = 1,
+  rel_heights = c(0.3, 0.3, 0.3, 0.3, 0.04, 0.04)
+)
+
+print(appendix_plot)
+ggsave(appendix_plot, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/appendix1.png", bg="white", width = 12, height = 12, units = "in", dpi = 300)
+```
+
+# Bar chart of willingness
+
+```{r}
+
+donor_data$IronSuppSanqCondition3 <- relevel(donor_data$IronSuppSanqCondition3, ref = "Disagree")
+donor_data$IronSuppSanqCondition4 <- relevel(donor_data$IronSuppSanqCondition4, ref = "Disagree")
+donor_data$IronSuppSanqCondition6 <- relevel(donor_data$IronSuppSanqCondition6, ref = "Disagree")
+
+# Functie om een stacked bar visualisatie te maken voor één IronSuppSanqCondition variabele
+create_iron_supp_stacked_plot <- function(data, condition_number, title, show_x_title = FALSE, show_y_title = TRUE) {
+  # Variabelnaam
+  var_name <- paste0("IronSuppSanqCondition", condition_number)
+  
+  # Maak kruistabel
+  cross_tab <- table(data$Country, data[[var_name]])
+  
+  # Omzetten naar dataframe voor ggplot
+  plot_data <- as.data.frame(cross_tab)
+  names(plot_data) <- c("Country", "Response", "Count")
+  
+  # Bereken percentages
+  plot_data <- plot_data %>%
+    group_by(Country) %>%
+    mutate(Percentage = Count / sum(Count) * 100)
+  
+  # Definieer de volgorde van de landen voor consistentie
+  plot_data$Country <- factor(plot_data$Country, 
+                              levels = c("FIN", "GER", "JPN", "NL", "SWE", "USA"))
+  
+  # Aangepast kleurenpalet met dieprood in plaats van oranje
+  custom_colors <- c("Agree" = my_colors[6], "Disagree" = my_colors[2])
+  
+  # X-as titel alleen tonen indien gewenst
+  x_title <- if(show_x_title) "Country" else NULL
+  # Y-as titel alleen tonen indien gewenst
+  y_title <- if(show_y_title) "Percentage (%)" else NULL
+  
+  # Maak stacked bar chart
+  p <- ggplot(plot_data, aes(x = Country, y = Percentage, fill = Response)) +
+    geom_bar(stat = "identity", position = "stack", width = 0.6) +
+    theme_minimal() +
+    labs(
+      title = title,
+      y = y_title,
+      x = x_title,
+      fill = "Response"
+    ) +
+    scale_fill_manual(values = custom_colors) +
+    theme(
+      axis.text.x = element_text(angle = 0, hjust = 0.5),
+      # Titel in het midden boven de plot
+      plot.title = element_text(size = 9, face = "bold", hjust = 0.5),
+      legend.position = "none",  # Geen individuele legenda per plot
+      # Overige tekst ook iets kleiner
+      axis.title.x = element_text(size = 8),
+      axis.title.y = element_text(size = 8),
+      axis.text = element_text(size = 7),
+      panel.grid.major.x = element_blank(),
+      # Extra ruimte boven de titel verminderen
+      plot.margin = margin(t = 10, r = 5, b = 5, l = 5)
+    )
+  
+  return(p)
+}
+
+# Titels voor de plots
+titles <- c(
+  "To continue donating",
+  "When advised by a donor physician",
+  "Not willing to use them"
+)
+
+# Maak de plots voor condities 3, 4 en 6
+p3 <- create_iron_supp_stacked_plot(donor_data, 3, titles[1], show_x_title = FALSE, show_y_title = TRUE)
+p4 <- create_iron_supp_stacked_plot(donor_data, 4, titles[2], show_x_title = FALSE, show_y_title = FALSE)
+p6 <- create_iron_supp_stacked_plot(donor_data, 6, titles[3], show_x_title = FALSE, show_y_title = FALSE)
+
+# Maak een gemeenschappelijke (as) titel
+x_title <- ggdraw() + 
+  draw_label("Country", size = 10, fontface = "plain", x = 0.5, y = 0.5)
+
+main_title <- ggdraw() + 
+  draw_label("Willingness to Use Iron Supplements Under Different Conditions", 
+             fontface = 'bold', size = 11, x = 0.5, hjust = 0.5)
+
+# create legend
+create_manual_legend <- function() {
+  # Kleuren voor de legenda
+  disagree_color <- my_colors[2]    
+  agree_color <- my_colors[6]
+  
+  legend_grob <- grobTree(
+    rectGrob(x = 0.40, y = 0.5, width = 0.03, height = 0.3, 
+            gp = gpar(fill = agree_color, col = "black")),
+    rectGrob(x = 0.5, y = 0.5, width = 0.03, height = 0.3, 
+            gp = gpar(fill = disagree_color, col = "black")),
+    
+    # Labels
+    textGrob("Agree", x = 0.43, y = 0.5, just = "left",
+            gp = gpar(fontsize = 7)),
+    textGrob("Disagree", x = 0.53, y = 0.5, just = "left",
+            gp = gpar(fontsize = 7))
+  )
+  
+  # Combineer elementen in één grob
+  combined_grob <- grobTree(legend_grob)
+  
+  # Converteer naar ggdraw element
+  legend_panel <- ggdraw() + 
+    draw_grob(combined_grob)
+  
+  return(legend_panel)
+}
+
+# Maak de handmatige legenda
+manual_legend <- create_manual_legend()
+
+# Combineer alles: plots, gemeenschappelijke x-as, en handmatige legenda
+plots_combined <- plot_grid(
+  p3, p4, p6,
+  ncol = 3,
+  align = 'h'
+)
+
+# Voeg hoofd- en x-as-titel toe
+final_plot <- plot_grid(
+  ggdraw() + draw_label("Willingness to Use Iron Supplements Under Different Conditions", 
+                        fontface = 'bold', size = 11, x = 0.5, hjust = 0.5),
+  plots_combined,
+  ggdraw() + draw_label("Country", size = 10, fontface = "plain", x = 0.5, y = 0.5),
+  create_manual_legend(),
+  ncol = 1,
+  rel_heights = c(0.08, 1, 0.06, 0.12)
+)
+
+print(final_plot)
+ggsave(final_plot, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure1.png", bg="white")
+```

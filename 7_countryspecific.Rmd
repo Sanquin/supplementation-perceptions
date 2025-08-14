@@ -1,0 +1,424 @@
+---
+title: "Knowledge, Confidence, and Willingness to Accept Iron Supplementation Among
+Blood Donors Across Multiple Countries - 7"
+author: "A. Meulenbeld"
+date: "2025-07-04"
+output: html_document
+---
+```{r setup, include=FALSE}
+library(knitr)
+library(dplyr)
+
+opts_chunk$set(#results = 'asis',      # Can also be set at the chunk-level. IT IS NEEDED IN THE dfsummary chunck
+               comment = NA,
+               prompt  = FALSE,
+               cache   = FALSE,
+               echo = TRUE,
+               message = FALSE,
+               warning = FALSE,
+               width.cutoff=60
+)
+library(summarytools)
+st_options(plain.ascii = FALSE,        # Always use this option in Rmd documents
+           style        = "rmarkdown", # Always use this option in Rmd documents
+           footnote     = NA,          # Makes html-rendered results more concise
+           subtitle.emphasis = FALSE)  # Improves layout with some rmardown themes
+
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(summarytools)
+library(haven)
+library(patchwork)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(grid)
+library(cowplot)
+library(forcats)
+library(stringr)
+
+```
+
+# Open data
+```{r, data}
+donor_data <- readRDS("L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/2. Datasets/thesis_fleur/processed_data.rds")
+```
+
+```{r}
+
+# Change disagree = 0 en agree = 1 & ref = NL
+donor_data$IronSuppSanqCondition3 <- relevel(donor_data$IronSuppSanqCondition3, ref = "Disagree")
+donor_data$IronSuppSanqCondition4 <- relevel(donor_data$IronSuppSanqCondition4, ref = "Disagree")
+donor_data$IronSuppSanqCondition6 <- relevel(donor_data$IronSuppSanqCondition6, ref = "Disagree")
+
+donor_data$general_confidence_percent_cat <- relevel(factor(donor_data$general_confidence_percent_cat), ref = "Medium")
+donor_data$general_knowledge_percent_cat <- relevel(factor(donor_data$general_knowledge_percent_cat), ref = "Medium")
+donor_data$hemoglobin_knowledge_percent_cat <- relevel(factor(donor_data$hemoglobin_knowledge_percent_cat), ref = "Medium")
+donor_data$hemoglobin_confidence_percent_cat <- relevel(factor(donor_data$hemoglobin_confidence_percent_cat), ref = "Medium")
+donor_data$ferritin_confidence_percent_cat <- relevel(factor(donor_data$ferritin_confidence_percent_cat), ref = "Medium")
+donor_data$ferritin_knowledge_percent_cat <- relevel(factor(donor_data$ferritin_knowledge_percent_cat), ref = "Medium")
+donor_data$ironsupplements_knowledge_percent_cat <- relevel(factor(donor_data$ironsupplements_knowledge_percent_cat), ref = "Medium")
+donor_data$ironsupplements_confidence_percent_cat <- relevel(factor(donor_data$ironsupplements_confidence_percent_cat), ref = "Medium")
+
+donor_data$Country <- relevel(factor(donor_data$Country), ref = "NL")
+
+# Change to numeric
+donor_data$opinion_numeric <- NA  # Begin met NA's
+donor_data$opinion_numeric[donor_data$OpinionBloodService7 == "Totally disagree"] <- 1
+donor_data$opinion_numeric[donor_data$OpinionBloodService7 == "Disagree"] <- 2
+donor_data$opinion_numeric[donor_data$OpinionBloodService7 == "Neutral"] <- 3
+donor_data$opinion_numeric[donor_data$OpinionBloodService7 == "Agree"] <- 4
+donor_data$opinion_numeric[donor_data$OpinionBloodService7 == "Totally agree"] <- 5
+
+#change to quadratic
+mean_opinion <- mean(donor_data$opinion_numeric, na.rm = TRUE)
+
+donor_data$opinion_centered <- donor_data$opinion_numeric - mean_opinion
+donor_data$opinion_centered_squared <- donor_data$opinion_centered^2
+
+# ===============================================================================
+# LAND-SPECIFIEKE ANALYSES
+# ===============================================================================
+
+# Eerst controleren welke landen er zijn in de data
+unique_countries <- unique(donor_data$Country)
+cat("Beschikbare landen in de dataset:\n")
+print(unique_countries)
+cat("\nAantal observaties per land:\n")
+print(table(donor_data$Country))
+
+# ===============================================================================
+# FUNCTIE VOOR LAND-SPECIFIEKE MODELLEN
+# ===============================================================================
+
+# Functie om modellen per land uit te voeren
+run_country_specific_models <- function(country_name, outcome_var) {
+  
+  # Filter data voor specifiek land
+  country_data <- donor_data[donor_data$Country == country_name, ]
+  
+  cat(sprintf("\n\n=== ANALYSES VOOR %s (N = %d) ===\n", 
+              country_name, nrow(country_data)))
+  
+  # Check of er genoeg data is
+  if(nrow(country_data) < 50) {
+    cat("WAARSCHUWING: Kleine steekproef (<50). Resultaten met voorzichtigheid interpreteren.\n")
+  }
+  
+  # Check distributie van outcome variabele
+  outcome_table <- table(country_data[[outcome_var]])
+  cat(sprintf("Distributie %s: %s\n", outcome_var, 
+              paste(names(outcome_table), outcome_table, sep="=", collapse=", ")))
+  
+  # Lijst om modellen op te slaan
+  models <- list()
+  
+  # Model 1: General knowledge
+  tryCatch({
+    models$general <- glm(
+      formula = as.formula(paste(outcome_var, "~ general_knowledge_percent_cat * general_confidence_percent_cat + Sex + prior_IronUse + opinion_centered + opinion_centered_squared")),
+      data = country_data, 
+      family = binomial(link = "logit")
+    )
+  }, error = function(e) {
+    cat("Fout bij general knowledge model:", e$message, "\n")
+    models$general <<- NULL
+  })
+  
+  # Model 2: Hemoglobin knowledge  
+  tryCatch({
+    models$hemoglobin <- glm(
+      formula = as.formula(paste(outcome_var, "~ hemoglobin_knowledge_percent_cat * hemoglobin_confidence_percent_cat + Sex + prior_IronUse + opinion_centered + opinion_centered_squared")),
+      data = country_data, 
+      family = binomial(link = "logit")
+    )
+  }, error = function(e) {
+    cat("Fout bij hemoglobin knowledge model:", e$message, "\n")
+    models$hemoglobin <<- NULL
+  })
+  
+  # Model 3: Ferritin knowledge
+  tryCatch({
+    models$ferritin <- glm(
+      formula = as.formula(paste(outcome_var, "~ ferritin_knowledge_percent_cat * ferritin_confidence_percent_cat + Sex + prior_IronUse + opinion_centered + opinion_centered_squared")),
+      data = country_data, 
+      family = binomial(link = "logit")
+    )
+  }, error = function(e) {
+    cat("Fout bij ferritin knowledge model:", e$message, "\n")
+    models$ferritin <<- NULL
+  })
+  
+  # Model 4: Iron supplements knowledge
+  tryCatch({
+    models$iron <- glm(
+      formula = as.formula(paste(outcome_var, "~ ironsupplements_knowledge_percent_cat * ironsupplements_confidence_percent_cat + Sex + prior_IronUse + opinion_centered + opinion_centered_squared")),
+      data = country_data, 
+      family = binomial(link = "logit")
+    )
+  }, error = function(e) {
+    cat("Fout bij iron supplements knowledge model:", e$message, "\n")
+    models$iron <<- NULL
+  })
+  
+  return(models)
+}
+
+# ===============================================================================
+# FUNCTIE VOOR ODDS RATIOS BEREKENING (AANGEPAST VOOR LAND-SPECIFIEKE ANALYSES)
+# ===============================================================================
+
+calculate_OR_country <- function(model) {
+  if(is.null(model)) return(NULL)
+  
+  # Bereken odds ratios
+  OR <- exp(coef(model))
+  
+  # Bereken betrouwbaarheidsintervallen
+  tryCatch({
+    CI <- exp(confint.default(model))
+    
+    # Check of dimensies kloppen
+    if(length(OR) != nrow(CI)) {
+      cat("Waarschuwing: Mismatch tussen aantal coëfficiënten en CI's\n")
+      cat(sprintf("Aantal OR's: %d, Aantal CI's: %d\n", length(OR), nrow(CI)))
+      
+      # Maak CI matrix met juiste dimensies
+      CI_fixed <- matrix(NA, nrow = length(OR), ncol = 2)
+      rownames(CI_fixed) <- names(OR)
+      colnames(CI_fixed) <- c("2.5 %", "97.5 %")
+      
+      # Kopieer beschikbare CI's
+      common_names <- intersect(names(OR), rownames(CI))
+      CI_fixed[common_names, ] <- CI[common_names, ]
+      
+      CI <- CI_fixed
+    }
+    
+    # Combineer resultaten
+    result <- data.frame(
+      OR = OR,
+      CI_lower = CI[,1],
+      CI_upper = CI[,2]
+    )
+    return(result)
+    
+  }, error = function(e) {
+    cat("Fout bij berekenen CI:", e$message, "\n")
+    # Maak backup met NA's
+    result <- data.frame(
+      OR = OR,
+      CI_lower = rep(NA, length(OR)),
+      CI_upper = rep(NA, length(OR))
+    )
+    return(result)
+  })
+}
+
+# Functie om ORs per land-specifiek model te printen
+print_country_OR_table <- function(model, model_name, country_name) {
+  if(is.null(model)) {
+    cat(sprintf("\n%s - %s: MODEL NIET UITGEVOERD (mogelijk convergentieproblemen)\n", 
+                country_name, model_name))
+    return(invisible(NULL))
+  }
+  
+  # Bereken OR data
+  or_data <- calculate_OR_country(model)
+  if(is.null(or_data)) return(invisible(NULL))
+  
+  # Haal p-waarden en variabele namen op
+  summary_data <- summary(model)
+  p_values <- summary_data$coefficients[,4]
+  var_names <- names(coef(model))
+  
+  # EXTRA CHECK: Zorg ervoor dat alle vectoren dezelfde lengte hebben
+  if(length(var_names) != nrow(or_data) || length(var_names) != length(p_values)) {
+    cat(sprintf("WAARSCHUWING %s - %s: Dimensie mismatch gedetecteerd\n", country_name, model_name))
+    cat(sprintf("Variabelen: %d, OR data: %d, P-values: %d\n", 
+                length(var_names), nrow(or_data), length(p_values)))
+    
+    # Gebruik de kortste lengte
+    min_length <- min(length(var_names), nrow(or_data), length(p_values))
+    var_names <- var_names[1:min_length]
+    or_data <- or_data[1:min_length, ]
+    p_values <- p_values[1:min_length]
+    
+    cat(sprintf("Aangepast naar lengte: %d\n", min_length))
+  }
+  
+  # Maak een duidelijke tabel
+  result_table <- data.frame(
+    Variable = var_names,
+    OR = round(or_data$OR, 2),
+    CI_95_lower = round(or_data$CI_lower, 2),
+    CI_95_upper = round(or_data$CI_upper, 2),
+    p_value = round(p_values, 3)
+  )
+  
+  # Voeg significantie toe
+  result_table$significance <- ""
+  result_table$significance[result_table$p_value < 0.05] <- "*"
+  result_table$significance[result_table$p_value < 0.01] <- "**"
+  result_table$significance[result_table$p_value < 0.001] <- "***"
+  
+  # Print header
+  cat(sprintf("\n--- %s - %s ---\n", country_name, model_name))
+  
+  # Print alle variabelen in logische volgorde (geen duplicaten)
+  for (i in 1:nrow(result_table)) {
+    cat(sprintf("%-60s: OR = %5.2f (95%% CI: %5.2f - %5.2f), p = %5.3f %s\n",
+                result_table$Variable[i],
+                result_table$OR[i],
+                result_table$CI_95_lower[i],
+                result_table$CI_95_upper[i],
+                result_table$p_value[i],
+                result_table$significance[i]))
+  }
+  
+  return(invisible(result_table))
+}
+
+# ===============================================================================
+# UITVOEREN VAN LAND-SPECIFIEKE ANALYSES
+# ===============================================================================
+
+# Voor elke conditie en elk land
+conditions <- c("IronSuppSanqCondition3", "IronSuppSanqCondition4", "IronSuppSanqCondition6")
+countries <- unique_countries[!is.na(unique_countries)]
+
+# Opslag voor alle resultaten
+all_country_results <- list()
+
+for(condition in conditions) {
+  cat(sprintf("\n\n################################################################################"))
+  cat(sprintf("\n%s - LAND-SPECIFIEKE ANALYSES", condition))
+  cat(sprintf("\n################################################################################"))
+  
+  all_country_results[[condition]] <- list()
+  
+  for(country in countries) {
+    # Run modellen voor dit land en deze conditie
+    country_models <- run_country_specific_models(country, condition)
+    
+    # Sla resultaten op
+    all_country_results[[condition]][[country]] <- country_models
+    
+    # Print OR tabellen
+    cat(sprintf("\n\n=== ODDS RATIOS VOOR %s - %s ===\n", country, condition))
+    
+    print_country_OR_table(country_models$general, "General Knowledge", country)
+    print_country_OR_table(country_models$hemoglobin, "Hemoglobin Knowledge", country)  
+    print_country_OR_table(country_models$ferritin, "Ferritin Knowledge", country)
+    print_country_OR_table(country_models$iron, "Iron Supplements Knowledge", country)
+  }
+}
+
+# ===============================================================================
+# VERGELIJKING TUSSEN LANDEN - SAMENVATTING
+# ===============================================================================
+
+cat("\n\n################################################################################")
+cat("\nSAMENVATTING: VERGELIJKING TUSSEN LANDEN")
+cat("\n################################################################################")
+
+# Functie om belangrijke bevindingen samen te vatten
+summarize_country_differences <- function(condition) {
+  cat(sprintf("\n\n=== %s ===\n", condition))
+  
+  for(country in countries) {
+    cat(sprintf("\n%s:\n", country))
+    
+    models <- all_country_results[[condition]][[country]]
+    
+    # Check welke modellen succesvol waren
+    successful_models <- names(models)[!sapply(models, is.null)]
+    failed_models <- names(models)[sapply(models, is.null)]
+    
+    if(length(successful_models) > 0) {
+      cat(sprintf("  Successvolle modellen: %s\n", paste(successful_models, collapse=", ")))
+    }
+    if(length(failed_models) > 0) {
+      cat(sprintf("  Gefaalde modellen: %s\n", paste(failed_models, collapse=", ")))
+    }
+    
+    # Zoek naar significante effecten
+    sig_effects <- c()
+    for(model_name in successful_models) {
+      model <- models[[model_name]]
+      if(!is.null(model)) {
+        p_vals <- summary(model)$coefficients[,4]
+        sig_vars <- names(p_vals)[p_vals < 0.05 & !names(p_vals) %in% c("(Intercept)")]
+        if(length(sig_vars) > 0) {
+          sig_effects <- c(sig_effects, paste(model_name, sig_vars, sep=": "))
+        }
+      }
+    }
+    
+    if(length(sig_effects) > 0) {
+      cat("  Significante effecten:\n")
+      for(effect in sig_effects) {
+        cat(sprintf("    - %s\n", effect))
+      }
+    } else {
+      cat("  Geen significante effecten gevonden\n")
+    }
+  }
+}
+
+# Voer samenvatting uit voor elke conditie
+for(condition in conditions) {
+  summarize_country_differences(condition)
+}
+
+# ===============================================================================
+# STATISTIEKEN PER LAND
+# ===============================================================================
+
+cat("\n\n################################################################################")
+cat("\nDESCRIPTIEVE STATISTIEKEN PER LAND")
+cat("\n################################################################################")
+
+for(country in countries) {
+  country_data <- donor_data[donor_data$Country == country, ]
+  
+  cat(sprintf("\n\n=== %s (N = %d) ===\n", country, nrow(country_data)))
+  
+  # Geslachtsverdeling
+  cat("Geslachtsverdeling:\n")
+  print(table(country_data$Sex))
+  
+  # Prior iron use
+  cat("\nEerder ijzergebruik:\n")
+  print(table(country_data$prior_IronUse, useNA = "ifany"))
+  
+  # Knowledge en confidence scores
+  cat("\nKnowledge & Confidence (gemiddelden):\n")
+  numeric_vars <- c("general_confidence_percent_cat", "general_knowledge_percent_cat",
+                   "hemoglobin_knowledge_percent_cat", "hemoglobin_confidence_percent_cat",
+                   "ferritin_confidence_percent_cat", "ferritin_knowledge_percent_cat",
+                   "ironsupplements_knowledge_percent_cat", "ironsupplements_confidence_percent_cat")
+  
+  for(var in numeric_vars) {
+    if(var %in% names(country_data)) {
+      tbl <- table(country_data[[var]], useNA = "ifany")
+      cat(sprintf("  %s: %s\n", var, paste(names(tbl), tbl, sep="=", collapse=", ")))
+    }
+  }
+  
+  # Outcome variabelen
+  cat("\nOutcome variabelen:\n")
+  for(condition in conditions) {
+    if(condition %in% names(country_data)) {
+      tbl <- table(country_data[[condition]], useNA = "ifany")
+      cat(sprintf("  %s: %s\n", condition, paste(names(tbl), tbl, sep="=", collapse=", ")))
+    }
+  }
+}
+
+cat("\n\n################################################################################")
+cat("\nLAND-SPECIFIEKE ANALYSES VOLTOOID")
+cat("\n################################################################################")
+
+```

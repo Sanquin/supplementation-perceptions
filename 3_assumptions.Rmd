@@ -1,0 +1,69 @@
+---
+title: "Knowledge, Confidence, and Willingness to Accept Iron Supplementation Among
+  \  \\  Blood Donors Across Multiple Countries - 3"
+author: "A. Meulenbeld"
+date: "2025-07-03"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(dplyr)
+
+opts_chunk$set(#results = 'asis',      # Can also be set at the chunk-level. IT IS NEEDED IN THE dfsummary chunck
+               comment = NA,
+               prompt  = FALSE,
+               cache   = FALSE,
+               echo = TRUE,
+               message = FALSE,
+               warning = FALSE,
+               width.cutoff=60
+)
+library(summarytools)
+st_options(plain.ascii = FALSE,        # Always use this option in Rmd documents
+           style        = "rmarkdown", # Always use this option in Rmd documents
+           footnote     = NA,          # Makes html-rendered results more concise
+           subtitle.emphasis = FALSE)  # Improves layout with some rmardown themes
+
+library(tidyverse)
+library(readxl)
+library(lubridate)
+library(summarytools)
+library(haven)
+library(patchwork)
+library(ggplot2)
+library(tidyr)
+library(gridExtra)
+library(grid)
+library(cowplot)
+```
+
+# Open data
+```{r, data}
+donor_data <- readRDS("L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/2. Datasets/thesis_fleur/processed_data.rds")
+```
+
+# Check VIF & linear relationship with the log-odds of the outcome 
+
+```{r}
+
+library(car)
+
+outcomes <- c("IronSuppSanqCondition3", "IronSuppSanqCondition4", "IronSuppSanqCondition6")  
+
+for (outcome in outcomes) {
+  formula <- as.formula(paste(outcome, "~ Sex + prior_IronUse + OpinionBloodService7 + Country + 
+                               general_knowledge_percent_cat + general_confidence_percent_cat + 
+                               hemoglobin_knowledge_percent_cat + hemoglobin_confidence_percent_cat + 
+                               ferritin_knowledge_percent_cat + ferritin_confidence_percent_cat + 
+                               ironsupplements_knowledge_percent_cat + ironsupplements_confidence_percent_cat"))
+  
+  model <- glm(formula, data = donor_data, family = binomial(link = "logit"))
+  
+  # Weergeven van de VIF voor elk uitkomstmodel
+  cat("\nVIF voor:", outcome, "\n")
+  print(vif(model))
+}
+
+
+```
