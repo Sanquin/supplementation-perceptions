@@ -674,7 +674,7 @@ create_manual_legend <- function() {
     Category = factor(c("Yes", "No"), levels = c("Yes", "No"))
   )
 
-  shape_map <- c("Yes" = 1, "No" = 16)  # Open and filled circles
+  shape_map <- c("Yes" = 16, "No" = 1)  # Open and filled circles
 
   ggplot() +
     geom_point(data = legend_data, 
@@ -1441,7 +1441,7 @@ create_manual_legend <- function() {
     Category = factor(c("Yes", "No"), levels = c("Yes", "No"))
   )
 
-  shape_map <- c("Yes" = 1, "No" = 16)  # Open and filled circles
+  shape_map <- c("Yes" = 16, "No" = 1)  # Open and filled circles
 
   ggplot() +
     geom_point(data = legend_data, 
