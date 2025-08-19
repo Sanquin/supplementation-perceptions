@@ -271,6 +271,7 @@ final_plot <- plot_grid(
 
 print(final_plot)
 ggsave(final_plot, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure2.png",bg="white")
+ggsave(final_plot, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure2.eps",bg="white")
 ```
 
 # For supplement: Each topic and country separated
@@ -721,4 +722,5 @@ final_plot <- plot_grid(
 
 print(final_plot)
 ggsave(final_plot, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure1.png", bg="white")
+ggsave(final_plot, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure1.eps", bg="white")
 ```

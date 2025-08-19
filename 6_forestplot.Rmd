@@ -720,6 +720,7 @@ print(final_plot)
 
 #save plot with ggsave
 ggsave(final_plot, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure3.png", bg="white", height = 6, width = 9)
+ggsave(final_plot, file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure3.eps", height = 6, width = 9)
 ```
 
 # Grid layout of models with interactions
@@ -1501,4 +1502,6 @@ print(blood_policy_grid)
 # Sla de grid op met goede verhouding
 ggsave(file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure4.png", blood_policy_grid,
        width = 12, height = 4, units = "in", dpi = 300, bg = "white")
+ggsave(file = "L:/DonorMedicin/FORTE/E Internation Donor Perception Survey/B Analysis/R/4. Results/willingness_ironsupplementation/figure4.eps", blood_policy_grid,
+       width = 12, height = 4, units = "in")
 ```
